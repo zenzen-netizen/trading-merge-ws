@@ -480,6 +480,59 @@ def calculate_ema_ribbon_krypt(
     out["div_enter_overext_bull_event"] = (div_pct >= overext_thresh) & (div_pct_prev < overext_thresh)
     out["div_enter_overext_bear_event"] = (div_pct <= -overext_thresh) & (div_pct_prev > -overext_thresh)
 
+    # ================================================================
+    # EMA SLOPE/ANGLE (ported dari _source/research-code/indicators/ema_ribbon.py
+    # fungsi ema_ribbon_pro, blok "EMA Slope/Angle (compare EMA20 3 candles back)".
+    # basis = ma1 (EMA20 by-posisi), 3 bar ke belakang. slope_pct versi lama DEAD, diabaikan.
+    # ================================================================
+    ma1_past3 = ma1.shift(3)
+    ema_slope = ma1 - ma1_past3
+    ema_slope_angle = pd.Series(
+        np.where(
+            ma1_past3.eq(0),
+            0.0,
+            np.degrees(np.arctan2(ema_slope, 3 * (ma1_past3 / 100))),
+        ),
+        index=out.index,
+    )
+    abs_slope_angle = ema_slope_angle.abs()
+
+    slope_conditions = [
+        abs_slope_angle < 2,
+        (abs_slope_angle < 10) & (ema_slope > 0),
+        (abs_slope_angle < 10) & (ema_slope <= 0),
+        (abs_slope_angle < 25) & (ema_slope > 0),
+        (abs_slope_angle < 25) & (ema_slope <= 0),
+        (abs_slope_angle < 45) & (ema_slope > 0),
+        (abs_slope_angle < 45) & (ema_slope <= 0),
+        ema_slope > 0,
+    ]
+    slope_labels = [
+        "Flat/Netral",
+        "Rising Bull", "Falling Bear",
+        "Steep Bull", "Steep Bear",
+        "Very Steep Bull", "Very Steep Bear",
+        "Parabolic Bull",
+    ]
+    slope_emojis = [
+        "➡️",
+        "↗️", "↘️",
+        "📈", "📉",
+        "🚀", "💀",
+        "🚀🚀",
+    ]
+    ema_slope_label = pd.Series(np.select(slope_conditions, slope_labels, default="Cliff Drop Bear"), index=out.index)
+    ema_slope_emoji = pd.Series(np.select(slope_conditions, slope_emojis, default="💀💀"), index=out.index)
+
+    slope_warmup = ema_slope.isna()
+    ema_slope_label = ema_slope_label.mask(slope_warmup, "warmup")
+    ema_slope_emoji = ema_slope_emoji.mask(slope_warmup, "")
+
+    out["ema_slope"] = ema_slope
+    out["ema_slope_angle"] = ema_slope_angle
+    out["ema_slope_label"] = ema_slope_label
+    out["ema_slope_emoji"] = ema_slope_emoji
+
     return out
 
 
