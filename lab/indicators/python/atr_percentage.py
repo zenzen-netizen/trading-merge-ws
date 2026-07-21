@@ -1,151 +1,133 @@
 """
-ATR Percentage with Bollinger Bands — Python port of TradingView Pine Script.
-Calculates ATR as % of close, then optionally wraps Bollinger Bands around
-ATR% (or raw ATR) to detect volatility regimes.
+indicators/python/atr_percentage.py
 
-Default params from Pine:
-  ATRPeriods = 22
-  useAtrAsPercent = True
-  BBPeriods = 20
-  StdDev = 2.0
+Replikasi Python dari "ATR Percentage" (Pine Script v4, HeWhoMustNotBeNamed).
+Panduan replikasi: journal/stage_03_replikasi_indikator.md
+
+STATUS: layer numerik + layer fase/zone sudah diimplementasikan.
+        BELUM divalidasi terhadap TradingView asli.
+
+Indikator ini simpel - single oscillator (ATR mentah atau ATR% dari
+close) dibungkus Bollinger Band (SMA + stdev). Gak ada state persisten
+antar-bar, gak ada cascade if-elif kompleks - jadi cocok dihitung
+vectorized penuh pakai pandas, gak perlu loop bar-by-bar.
+
+Dua layer output:
+1. Layer numerik : atr, atr_percent, bb_middle, bb_top, bb_bottom
+2. Layer fase     : volatility_zone (4 kategori, analog area fill
+                    "High/Low Volatility Zone" di chart asli)
+
+Gotcha yang dijaga:
+- Pine v4 atr() = ta.rma(tr, length) = Wilder smoothing, SAMA dengan
+  ta.atr() di v6 - dipakai fungsi wilder_atr() yang sama polanya
+  dengan yang dipakai di fbf_break_filter.py
+- Pine bb()/ta.stdev() default pakai population stdev (ddof=0, dibagi
+  N bukan N-1) - dipakai .std(ddof=0), BUKAN default pandas (ddof=1).
+  Ini gampang kelewat kalau gak hati-hati, beda dikit tapi konsisten
+  beda kalau salah pilih.
+- useAtrAsPercent nentuin oscillator dasar buat BB dihitung dari ATR%
+  atau ATR mentah - kolom bb_* selalu ngikut basis yang aktif
+  (parameter use_atr_as_percent), BUKAN dihitung dua-duanya sekaligus.
 """
 
 import pandas as pd
 import numpy as np
 
 
-def _rma(series, length):
-    """Wilder's RMA (same as Pine's rma / atr built-in)."""
-    return series.ewm(alpha=1 / length, adjust=False).mean()
-
-
-def _sma(series, length):
-    """Simple Moving Average."""
-    return series.rolling(window=length, min_periods=length).mean()
-
-
-def _stddev(series, length):
-    """Population std dev (ddof=0) matching Pine's stdev()."""
-    return series.rolling(window=length, min_periods=length).std(ddof=0)
-
-
-def atr_percentage(df, cfg=None):
-    """
-    Calculate ATR Percentage (+ Bollinger Bands on ATR%).
-
-    Args:
-        df: DataFrame with columns ['high','low','close']
-        cfg: dict with keys:
-            atr_period (default: 22)
-            use_atr_pct (default: True) — BB on atrPercent vs raw atr
-            show_bb (default: True)
-            bb_period (default: 20)
-            bb_stddev (default: 2.0)
-
-    Returns:
-        dict with:
-            atr: raw ATR value
-            atr_pct: ATR as % of close
-            bb_middle, bb_top, bb_bottom
-            bb_width: band width (top - bottom)
-            bb_width_pct: band width as % of price
-            zone: "ABOVE_TOP", "INSIDE", "BELOW_BOTTOM", "NaN"
-            position_pct: where atr_pct sits in [bottom, top], 0–100%
-            atr_pct_mean: SMA of atr_pct over bb_period
-            atr_pct_std: stddev of atr_pct over bb_period
-    """
-    if cfg is None:
-        cfg = {}
-
-    atr_period = cfg.get("atr_period", 30)
-    use_atr_pct = cfg.get("use_atr_pct", True)
-    show_bb = cfg.get("show_bb", True)
-    bb_period = cfg.get("bb_period", 20)
-    bb_stddev = cfg.get("bb_stddev", 2.0)
-
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-
-    # --- True Range ---
+def wilder_atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+    """Analog atr()/ta.atr() Pine = Wilder smoothing (RMA) dari True Range."""
+    prev_close = close.shift(1)
     tr = pd.concat(
-        [
-            high - low,
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ],
-        axis=1,
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
     ).max(axis=1)
+    atr = pd.Series(np.nan, index=close.index)
+    n = len(close)
+    if n < length:
+        return atr
+    atr.iloc[length - 1] = tr.iloc[:length].mean()
+    for i in range(length, n):
+        atr.iloc[i] = (atr.iloc[i - 1] * (length - 1) + tr.iloc[i]) / length
+    return atr
 
-    # --- ATR ---
-    atr = _rma(tr, atr_period)
-    atr_val = atr.iloc[-1]
-    close_val = close.iloc[-1]
 
-    # --- ATR% ---
-    atr_pct_series = (atr / close) * 100.0
-    atr_pct_val = atr_pct_series.iloc[-1]
+def calculate_atr_percentage(
+    df: pd.DataFrame,
+    atr_periods: int = 22,
+    use_atr_as_percent: bool = True,
+    bb_periods: int = 20,
+    bb_stddev: float = 2.0,
+) -> pd.DataFrame:
+    """
+    df wajib punya kolom: 'high', 'low', 'close'.
+    Parameter default persis sama dengan default input Pine source asli.
+    """
+    out = df.copy()
 
-    result = {
-        "atr": round(atr_val, 6),
-        "atr_pct": round(atr_pct_val, 4),
-    }
+    atr = wilder_atr(out["high"], out["low"], out["close"], atr_periods)
+    atr_percent = (atr / out["close"]) * 100
 
-    # --- Bollinger Bands ---
-    if show_bb:
-        source = atr_pct_series if use_atr_pct else atr
+    basis = atr_percent if use_atr_as_percent else atr
 
-        middle = _sma(source, bb_period)
-        std = _stddev(source, bb_period)
+    bb_middle = basis.rolling(bb_periods).mean()
+    bb_std = basis.rolling(bb_periods).std(ddof=0)  # population stdev, samain ke Pine
+    bb_top = bb_middle + bb_std * bb_stddev
+    bb_bottom = bb_middle - bb_std * bb_stddev
 
-        top = middle + bb_stddev * std
-        bottom = middle - bb_stddev * std
+    out["atr"] = atr
+    out["atr_percent"] = atr_percent
+    out["bb_middle"] = bb_middle
+    out["bb_top"] = bb_top
+    out["bb_bottom"] = bb_bottom
 
-        mid_val = middle.iloc[-1]
-        top_val = top.iloc[-1]
-        bot_val = bottom.iloc[-1]
-        std_val = std.iloc[-1]
-
-        result["bb_middle"] = round(mid_val, 4) if not np.isnan(mid_val) else None
-        result["bb_top"] = round(top_val, 4) if not np.isnan(top_val) else None
-        result["bb_bottom"] = round(bot_val, 4) if not np.isnan(bot_val) else None
-        result["bb_std"] = round(std_val, 4) if not np.isnan(std_val) else None
-
-        # Band width in same units (atr% or raw atr)
-        bw = top_val - bot_val
-        result["bb_width"] = round(bw, 4) if not np.isnan(bw) else None
-
-        # Band width as % of price (useful for context)
-        bw_pct = (bw / close_val * 100) if not use_atr_pct and close_val != 0 else bw
-        result["bb_width_pct"] = round(bw_pct, 4) if not np.isnan(bw_pct) else None
-
-        # Zone classification
-        if np.isnan(atr_pct_val) or np.isnan(top_val) or np.isnan(bot_val):
-            result["zone"] = "NaN"
-            result["position_pct"] = None
-        elif atr_pct_val > top_val:
-            result["zone"] = "HIGH_VOL"  # ATR% above upper BB → high vol regime
-        elif atr_pct_val < bot_val:
-            result["zone"] = "LOW_VOL"  # ATR% below lower BB → low vol regime
+    # --- volatility_zone: analog area fill "High/Low Volatility Zone" ---
+    def _zone(row):
+        if pd.isna(row["bb_middle"]):
+            return "warmup"
+        v = basis.loc[row.name]
+        if pd.isna(v):
+            return "warmup"
+        if v > row["bb_top"]:
+            return "above_top"       # di luar band atas, ekstrem tinggi
+        elif v > row["bb_middle"]:
+            return "high_zone"       # area fill merah (High Volatility Zone)
+        elif v >= row["bb_bottom"]:
+            return "low_zone"        # area fill hijau (Low Volatility Zone)
         else:
-            result["zone"] = "NORMAL"
+            return "below_bottom"    # di luar band bawah, ekstrem rendah
 
-        # Position within BB as 0-100%
-        if not np.isnan(bw) and bw != 0 and not np.isnan(bot_val):
-            pos = ((atr_pct_val - bot_val) / bw) * 100.0
-            result["position_pct"] = round(pos, 1)
-        else:
-            result["position_pct"] = None
+    out["volatility_zone"] = out.apply(_zone, axis=1)
 
-        # atr_pct mean & std (for reference)
-        result["atr_pct_mean"] = round(mid_val, 4) if not np.isnan(mid_val) else None
-        result["atr_pct_std"] = round(std_val, 4) if not np.isnan(std_val) else None
-    else:
-        result["bb_middle"] = None
-        result["bb_top"] = None
-        result["bb_bottom"] = None
-        result["bb_width"] = None
-        result["zone"] = "N/A"
-        result["position_pct"] = None
+    return out
 
-    return result
+
+# ============================================================
+# CATATAN VALIDASI - WAJIB DIKERJAKAN SEBELUM DIPAKAI BACKTEST
+# ============================================================
+#
+# [ ] Cocokkan atr/atr_percent Python vs plot "ATR/Percent" TradingView
+#     di beberapa titik sample.
+# [ ] Cocokkan bb_top/bb_middle/bb_bottom Python vs 3 garis BB di chart.
+# [ ] PERHATIKAN KHUSUS: cek apakah ta.stdev/bb() Pine emang population
+#     stdev (ddof=0) - asumsi ini diambil dari dokumentasi umum Pine,
+#     TAPI belum dicross-check numerik lawan TradingView asli. Kalau
+#     pas validasi ketemu selisih konsisten kecil, ini kandidat pertama
+#     buat dicek (coba ganti ddof=1).
+# [ ] Kalau use_atr_as_percent nanti dipakai False, validasi ulang basis
+#     ATR mentah (bukan cuma yang persen).
+
+
+if __name__ == "__main__":
+    rng_seed = np.random.default_rng(3)
+    n_bars = 200
+    close = 100 + np.cumsum(rng_seed.normal(0, 1, n_bars))
+    high = close + rng_seed.uniform(0.1, 1.5, n_bars)
+    low = close - rng_seed.uniform(0.1, 1.5, n_bars)
+
+    df_test = pd.DataFrame({"high": high, "low": low, "close": close})
+    result = calculate_atr_percentage(df_test)
+
+    print("Kolom hasil:", list(result.columns))
+    print("\nContoh 10 baris setelah warm-up:")
+    print(result[["atr", "atr_percent", "bb_middle", "bb_top", "bb_bottom", "volatility_zone"]].iloc[25:35].to_string())
+    print("\nDistribusi volatility_zone (sanity check, data sintetis):")
+    print(result["volatility_zone"].value_counts())
