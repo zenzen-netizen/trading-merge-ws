@@ -1,0 +1,1075 @@
+//@version=6
+indicator("Fractal Break Filter v11", "FBF v11 — Multi-Slot Kandidat + ABC Mode Tunggal", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ═══════════════════════════════════════════════════════════════
+// CHANGELOG v11 (dari v10):
+// PRINSIP: mesin multi-slot v10 UTUH. Supertrend & HTF 🔒 tidak disentuh.
+//
+// 1. FULL ABCD DIHAPUS — ABC jadi mode TUNGGAL.
+//    Alasan: leg D di v10 sudah digambar SAAT BREAK confirm, dari C ke
+//    bar breakout. Itu informasi SAMA dengan garis + label BREAK.
+//    D = titik break, dan label BREAK sudah menandainya. Leg D redundan.
+//    Struktur HH-HL-HH sudah tertangkap penuh oleh wave A-B-C.
+//    Efek: 1 sumber kebenaran (label BREAK), nol duplikasi mekanik,
+//    sinkronisasi kode-visual naik.
+//    Yang dibuang:
+//      - input cycleMode, abcdCD_BullCol, abcdCD_BearCol,
+//        labelSizeD_str, labelOffD
+//      - variabel labelSizeD, offD
+//      - seluruh blok gambar leg D + label "D" di Otak 2 (bull & bear)
+//      - array riwayat leg D (bullCDLineArr, bullDLblArr, dst)
+//    tbBCcol/trBCcol sekarang selalu pakai warna leg B→C mode ABC.
+//
+// 2. WARISAN v10 yang tetap jalan:
+//    - Tipe `Cand` = snapshot BEKU 1 wave (aVal/aBar, bVal/bBar, cVal/cBar
+//      + juri sendiri). Tracker push Cand tiap C terkunci. Array 8/sisi.
+//    - Otak 2 loop SEMUA kandidat paralel. Skenario 1/2/3 tertutup.
+//    - Kandidat gugur buffer ATR → level B dotted abu + tanda ✖ opsional.
+//    - Tracker selalu lepas slot begitu C terkunci.
+//    - barstate.isconfirmed wajib buat confirm (non-repaint).
+// ═══════════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════════
+// 1. FRACTAL & MEMORI
+// ═══════════════════════════════════════════════════════════════
+leftBars         = input.int(3, "Pivot Left Bars",  minval=1, group="1. Fractal & Memori")
+rightBars        = input.int(3, "Pivot Right Bars", minval=1, group="1. Fractal & Memori", tooltip="Lag deteksi = sebesar ini. Pivot dikonfirmasi setelah rightBars candle ke kanan terbentuk")
+showPivotMarkers = input.bool(true,  "Tampilkan marker pivot?", group="1. Fractal & Memori")
+pivotHighCol     = input.color(color.new(color.gray, 30), "Warna pivot high", group="1. Fractal & Memori")
+pivotLowCol      = input.color(color.new(color.gray, 30), "Warna pivot low",  group="1. Fractal & Memori")
+
+// ═══════════════════════════════════════════════════════════════
+// 2. RAW CANDIDATE
+// ═══════════════════════════════════════════════════════════════
+showRawCandidates = input.bool(true, "Tampilkan raw break candidate?", group="2. Raw Candidate", tooltip="Semua momen close tembus pivot, TANPA filter apapun")
+rawBullCol        = input.color(color.new(#26A69A, 10), "Warna raw candidate bull", group="2. Raw Candidate")
+rawBearCol        = input.color(color.new(#EF5350, 10), "Warna raw candidate bear", group="2. Raw Candidate")
+
+// ═══════════════════════════════════════════════════════════════
+// 3. FILTER LEG A
+// ═══════════════════════════════════════════════════════════════
+enableAFractal = input.bool(true, "A1: Fractal lebih besar untuk titik A?", group="3. Filter Leg A", tooltip="A harus dikonfirmasi oleh fractal periode lebih besar. Kalkulasi pivot besar tidak berjalan saat OFF")
+aLeftBars      = input.int(5, "A1: A Pivot Left Bars",  minval=1, group="3. Filter Leg A")
+aRightBars     = input.int(5, "A1: A Pivot Right Bars", minval=1, group="3. Filter Leg A")
+
+enableADist    = input.bool(true,  "A2: Jarak minimum A-B?", group="3. Filter Leg A", tooltip="Leg A→B harus punya jarak harga minimal sekian × ATR(14). Nyaring A yang terlalu dekat ke B")
+aDistMult      = input.float(1.0, "A2: Min A-B distance (× ATR)", minval=0.1, step=0.1, group="3. Filter Leg A")
+
+enableALookback = input.bool(false, "A3: Scan titik A paling ekstrem?", group="3. Filter Leg A", tooltip="PRIORITAS TERTINGGI kalau ON: scan ke belakang N bar dari B, ambil yang PALING EKSTREM")
+aLookbackBars   = input.int(50, "A3: Lookback bars dari B", minval=5, group="3. Filter Leg A")
+
+// ═══════════════════════════════════════════════════════════════
+// 4. FILTER LEG C
+// ═══════════════════════════════════════════════════════════════
+enableCFractal = input.bool(false, "C1: Fractal lebih besar untuk titik C?", group="4. Filter Leg C", tooltip="C harus dikonfirmasi oleh fractal periode lebih besar dari fractal utama. Rekomen OFF di M5-M15, pertimbangkan ON di H1+")
+cLeftBars      = input.int(5, "C1: C Pivot Left Bars",  minval=1, group="4. Filter Leg C")
+cRightBars     = input.int(5, "C1: C Pivot Right Bars", minval=1, group="4. Filter Leg C")
+
+enableFiboBC   = input.bool(true, "C2: Fibo zone retracement B-C?", group="4. Filter Leg C", tooltip="C harus jatuh di zona retracement proporsional terhadap leg A-B.")
+bcFiboMin      = input.float(0.5, "C2: Min retracement ratio (dari A-B)", minval=0.0, maxval=1.0, step=0.001, group="4. Filter Leg C")
+bcFiboMax      = input.float(0.786, "C2: Max retracement ratio (dari A-B)", minval=0.0, maxval=1.0, step=0.001, group="4. Filter Leg C")
+
+enableStructFilter = input.bool(true, "Aktifkan filter struktur pola?", group="4. Filter Leg C", tooltip="C3. Bull: C harus lebih tinggi dari A → Higher Low valid → pola HH-HL-HH sah. Bear: C harus lebih rendah dari A → Lower High valid → LH-LL-LH sah.")
+
+// ═══════════════════════════════════════════════════════════════
+// 5. FILTER BREAK
+// ═══════════════════════════════════════════════════════════════
+enableAtrFilter = input.bool(true,  "Aktifkan ATR buffer filter?", group="5. Filter Break")
+atrLen          = input.int(14,     "ATR Length", minval=1, group="5. Filter Break")
+atrMult         = input.float(0.15, "ATR Multiplier (break D)", minval=0, step=0.05, group="5. Filter Break", tooltip="Close harus tembus level B minimal sejauh ini × ATR. Nyaring break tipis/marginal")
+
+enablePersistFilter = input.bool(false, "Aktifkan persistence filter?", group="5. Filter Break")
+persistN            = input.int(2,    "Jumlah candle bertahan", minval=1, group="5. Filter Break", tooltip="Harus bertahan di luar level B sebanyak N candle berturut-turut. Nyaring fakeout 1-candle")
+
+enableSmiFilter = input.bool(false, "Aktifkan SMI agreement filter?", group="5. Filter Break", tooltip="Default OFF. Kalkulasi SMI internal tidak berjalan saat OFF")
+smiLenK         = input.int(5, "SMI %K",  minval=1, group="5. Filter Break")
+smiLenD         = input.int(3, "SMI %D",  minval=1, group="5. Filter Break")
+smiLenE         = input.int(3, "SMI EMA", minval=1, group="5. Filter Break")
+
+noDuplicate = input.bool(true, "Cegah duplikat break di fase swing yang sama?", group="5. Filter Break")
+
+// ═══════════════════════════════════════════════════════════════
+// 6. FILTER TREND VISUAL (EMA / SUPERTREND)
+// ═══════════════════════════════════════════════════════════════
+enableEmaTrendFilter = input.bool(false, "Sembunyikan wave saat lawan trend EMA?", group="6. Filter Trend Visual", tooltip="Bull (wave ABCD + level B + garis BREAK) disembunyikan dari chart saat close < Slow MA. Bear disembunyikan saat close > Slow MA. Ikut setting Slow MA di grup 'Sumber MA Current TF'. Kalau MA Cross OFF, filter ini otomatis tidak berlaku. HANYA menyembunyikan tampilan — deteksi & konfirmasi break di balik layar tidak berubah.")
+enableStTrendFilter  = input.bool(true, "Sembunyikan wave saat lawan trend Supertrend?", group="6. Filter Trend Visual", tooltip="Bull (wave ABCD + level B + garis BREAK) disembunyikan saat Supertrend sedang downtrend. Bear disembunyikan saat Supertrend sedang uptrend. Ikut mode Supertrend (Classic/Adaptive) yang aktif di grup 'Sumber ST Current TF'. Kalau Supertrend OFF, filter ini otomatis tidak berlaku. HANYA menyembunyikan tampilan.")
+
+// ═══════════════════════════════════════════════════════════════
+// 7. SUMBER MA CURRENT TF
+// ═══════════════════════════════════════════════════════════════
+enableMA   = input.bool(true, "Aktifkan MA Cross?", group="7. Sumber MA Current TF")
+maFastType = input.string("EMA", "Fast MA Type", options=["EMA", "SMA"], group="7. Sumber MA Current TF")
+maFastLen  = input.int(20, "Fast MA Period", minval=1, group="7. Sumber MA Current TF")
+maSlowType = input.string("EMA", "Slow MA Type", options=["EMA", "SMA"], group="7. Sumber MA Current TF")
+maSlowLen  = input.int(50, "Slow MA Period", minval=1, group="7. Sumber MA Current TF")
+maFastCol  = input.color(color.new(#29B6F6, 0), "Warna Fast MA", group="7. Sumber MA Current TF")
+maSlowCol  = input.color(color.new(#FF9800, 0), "Warna Slow MA", group="7. Sumber MA Current TF")
+
+// ═══════════════════════════════════════════════════════════════
+// 8. SUMBER ST CURRENT TF 🔒 (dilindungi, isi persis v6.10.2)
+// ═══════════════════════════════════════════════════════════════
+enableST = input.bool(true, "Aktifkan Supertrend?", group="8. Sumber ST Current TF")
+stMode   = input.string("Adaptive", "Mode Supertrend", options=["Classic", "Adaptive"], group="8. Sumber ST Current TF")
+
+stClassicPeriod   = input.int(10,  "Classic — ATR Period",     minval=1,   group="8. Sumber ST Current TF")
+stClassicSrcInput = input.source(hl2, "Classic — Source", group="8. Sumber ST Current TF")
+stClassicMult     = input.float(3.0, "Classic — ATR Multiplier", minval=0.1, step=0.1, group="8. Sumber ST Current TF")
+stClassicAtrSma   = input.bool(false, "Classic — Change ATR Calculation Method?", group="8. Sumber ST Current TF")
+
+stAdaptPeriod   = input.int(10,  "Adaptive — ATR Period",     minval=1,   group="8. Sumber ST Current TF")
+stAdaptSrcInput = input.source(hl2, "Adaptive — Source", group="8. Sumber ST Current TF")
+stAdaptMult     = input.float(3.0, "Adaptive — ATR Multiplier", minval=0.1, step=0.1, group="8. Sumber ST Current TF")
+stAdaptAtrSma   = input.bool(false, "Adaptive — Change ATR Calculation Method?", group="8. Sumber ST Current TF")
+
+stBullCol      = input.color(color.new(#26A69A, 0), "Warna Supertrend Uptrend",   group="8. Sumber ST Current TF")
+stBearCol      = input.color(color.new(#EF5350, 0), "Warna Supertrend Downtrend", group="8. Sumber ST Current TF")
+stShowSignals  = input.bool(false, "Tampilkan sinyal Buy/Sell?", group="8. Sumber ST Current TF")
+stHighlighting = input.bool(false, "Highlighter On/Off?", group="8. Sumber ST Current TF")
+
+// ═══════════════════════════════════════════════════════════════
+// 9. SUMBER HTF MA & ST 🔒 (dilindungi, isi persis v6.10.2)
+// ═══════════════════════════════════════════════════════════════
+enableHTF     = input.bool(false, "Aktifkan HTF MA & Supertrend?", group="9. Sumber HTF MA & ST")
+htfTf         = input.timeframe("60", "Timeframe HTF", group="9. Sumber HTF MA & ST")
+
+enableHTFMA   = input.bool(true,  "Tampilkan HTF MA?", group="9. Sumber HTF MA & ST")
+htfMAFastType = input.string("EMA", "HTF Fast MA Type", options=["EMA", "SMA"], group="9. Sumber HTF MA & ST")
+htfMAFastLen  = input.int(20, "HTF Fast MA Period", minval=1, group="9. Sumber HTF MA & ST")
+htfMASlowType = input.string("EMA", "HTF Slow MA Type", options=["EMA", "SMA"], group="9. Sumber HTF MA & ST")
+htfMASlowLen  = input.int(50, "HTF Slow MA Period", minval=1, group="9. Sumber HTF MA & ST")
+htfMAFastCol  = input.color(color.new(#F48FB1, 0), "Warna HTF Fast MA", group="9. Sumber HTF MA & ST")
+htfMASlowCol  = input.color(color.new(#CE93D8, 0), "Warna HTF Slow MA", group="9. Sumber HTF MA & ST")
+htfMAFastWidth = input.int(2, "Lebar HTF Fast MA", minval=1, maxval=4, group="9. Sumber HTF MA & ST")
+htfMASlowWidth = input.int(3, "Lebar HTF Slow MA", minval=1, maxval=4, group="9. Sumber HTF MA & ST")
+
+enableHTFST   = input.bool(true,  "Tampilkan HTF Supertrend?", group="9. Sumber HTF MA & ST")
+htfSTMode     = input.string("Adaptive", "HTF ST Mode", options=["Classic", "Adaptive"], group="9. Sumber HTF MA & ST")
+htfSTPeriod   = input.int(10,  "HTF ST ATR Period", minval=1, group="9. Sumber HTF MA & ST")
+htfSTMult     = input.float(3.0, "HTF ST ATR Multiplier", minval=0.1, step=0.1, group="9. Sumber HTF MA & ST")
+htfSTBullCol  = input.color(color.new(#A5D6A7, 0), "Warna HTF ST Uptrend",   group="9. Sumber HTF MA & ST")
+htfSTBearCol  = input.color(color.new(#FFAB91, 0), "Warna HTF ST Downtrend", group="9. Sumber HTF MA & ST")
+htfSTWidth    = input.int(2, "Lebar garis HTF Supertrend", minval=1, maxval=4, group="9. Sumber HTF MA & ST")
+htfSTHighlight = input.bool(true, "Highlighter HTF ST?", group="9. Sumber HTF MA & ST")
+
+// ═══════════════════════════════════════════════════════════════
+// 10. VISUAL ABCD
+// ═══════════════════════════════════════════════════════════════
+showAbcd    = input.bool(true, "Tampilkan visualisasi ABC?", group="10. Visual ABC")
+abcdBullCol  = input.color(color.new(#00E5FF, 0), "Warna wave — Bull", group="10. Visual ABC")
+abcdBearCol  = input.color(color.new(#FFC400, 0), "Warna wave — Bear", group="10. Visual ABC")
+abcdWidth    = input.int(3, "Lebar segmen zigzag", minval=1, maxval=3, group="10. Visual ABC")
+showAbcdTags = input.bool(true, "Tampilkan label A/B/C?", group="10. Visual ABC")
+abcBC_BullCol = input.color(color.new(#ffffff, 0), "Warna leg B→C — Bull", group="10. Visual ABC")
+abcBC_BearCol = input.color(color.new(#e040fb, 0), "Warna leg B→C — Bear", group="10. Visual ABC")
+
+labelOffsetMode = input.string("Default", "Mode offset label ABC", options=["Default", "Adaptive"], group="10. Visual ABC")
+labelOffA = input.float(0.5, "  ↳ Offset A (× ATR14)", minval=0.0, maxval=5.0, step=0.1, group="10. Visual ABC")
+labelOffB = input.float(1.0, "  ↳ Offset B (× ATR14)", minval=0.0, maxval=5.0, step=0.1, group="10. Visual ABC")
+labelOffC = input.float(0.5, "  ↳ Offset C (× ATR14)", minval=0.0, maxval=5.0, step=0.1, group="10. Visual ABC")
+
+labelSizeABC_str = input.string("normal", "Ukuran label A/B/C", options=["tiny", "small", "normal", "large", "huge"], group="10. Visual ABC")
+
+hideWaveDuringCPending = input.bool(false, "Sembunyikan wave selama C masih tentatif (C?)?", group="10. Visual ABC")
+hideWaveIfC2Invalid = input.bool(false, "Sembunyikan wave kalau C confirm di luar zona C2 valid?", group="10. Visual ABC")
+
+f_labelSize(s) =>
+    s == "tiny"   ? size.tiny   : s == "small"  ? size.small  : s == "large"  ? size.large  : s == "huge"   ? size.huge   : size.normal
+
+labelSizeABC = f_labelSize(labelSizeABC_str)
+
+tbBCcol = abcBC_BullCol
+trBCcol = abcBC_BearCol
+
+// ═══════════════════════════════════════════════════════════════
+// 11. VISUAL FIBO ZONE
+// ═══════════════════════════════════════════════════════════════
+showFiboZone        = input.bool(true, "Tampilkan box zona fibo C2?", group="11. Visual Fibo Zone")
+fiboZoneGrayCol     = input.color(#9E9E9E, "Warna zona: belum masuk", group="11. Visual Fibo Zone")
+fiboZoneGreenCol    = input.color(#089981, "Warna zona: valid (masuk range)", group="11. Visual Fibo Zone")
+fiboZoneOrangeCol   = input.color(#FF9100, "Warna zona: melebihi batas", group="11. Visual Fibo Zone")
+fiboZoneTentativeTransp = input.int(55, "Transparansi fill — tentatif (C?)", minval=0, maxval=95, group="11. Visual Fibo Zone")
+fiboZoneSolidTransp     = input.int(38, "Transparansi fill — confirmed (C)", minval=0, maxval=95, group="11. Visual Fibo Zone")
+fiboBoxExtendBars = input.int(5, "C2: Perpanjang box N bar setelah C confirm", minval=0, group="11. Visual Fibo Zone")
+
+// ═══════════════════════════════════════════════════════════════
+// 12. VISUAL BREAK & LEVEL B
+// ═══════════════════════════════════════════════════════════════
+showBLine      = input.bool(true, "Tampilkan level B (garis horizontal)?", group="12. Visual Break & Level B")
+bLineCol       = input.color(color.new(#B0BEC5, 0), "Warna level B", group="12. Visual Break & Level B")
+bLineWidth     = input.int(3, "Lebar garis level B", minval=1, maxval=4, group="12. Visual Break & Level B")
+showBreakLine  = input.bool(true, "Tampilkan garis break resmi (B→D)?", group="12. Visual Break & Level B")
+bullBreakCol   = input.color(color.new(#00E676, 0), "Warna break BUY",  group="12. Visual Break & Level B")
+bearBreakCol   = input.color(color.new(#FF1744, 0), "Warna break SELL", group="12. Visual Break & Level B")
+breakLineWidth = input.int(2, "Lebar garis break", minval=1, maxval=4, group="12. Visual Break & Level B")
+showBreakLabel = input.bool(true, "Tampilkan label BREAK?", group="12. Visual Break & Level B")
+showFilterTag  = input.bool(true, "Label sebutkan filter yang aktif?", group="12. Visual Break & Level B")
+showFailMark   = input.bool(true, "Tampilkan tanda kandidat gagal (✖)?", group="12. Visual Break & Level B", tooltip="Label ✖ kecil abu di bar tempat kandidat break gugur dari buffer ATR (gagal bertahan). Nutup masalah 'kandidat hilang diam-diam'.")
+
+useFilterTierColor = input.bool(false, "Pakai warna per filter (bukan bull/bear)?", group="12. Visual Break & Level B")
+colTierStruct      = input.color(color.new(#E040FB, 0), "Warna tier: Struktur aktif", group="12. Visual Break & Level B")
+colTierSmi         = input.color(color.new(#FFD600, 0), "Warna tier: SMI aktif", group="12. Visual Break & Level B")
+colTierPersist     = input.color(color.new(#FF6F00, 0), "Warna tier: Persistence aktif", group="12. Visual Break & Level B")
+colTierAtr         = input.color(color.new(#29B6F6, 0), "Warna tier: cuma ATR aktif", group="12. Visual Break & Level B")
+colTierRaw         = input.color(color.new(#9E9E9E, 0), "Warna tier: gak ada filter aktif", group="12. Visual Break & Level B")
+
+// ═══════════════════════════════════════════════════════════════
+// 13. VISUAL LOOKBACK
+// ═══════════════════════════════════════════════════════════════
+visualLookbackMode = input.string("Bar Count", "Mode Filter Lookback Visual", options=["Bar Count", "Days"], group="13. Visual Lookback")
+visualLookbackBars = input.int(100, "  ↳ Jumlah bar ke belakang", minval=10, group="13. Visual Lookback")
+visualLookbackDays = input.int(30, "  ↳ Jumlah hari ke belakang", minval=1, group="13. Visual Lookback")
+
+
+// ═══════════════════════════════════════════════════════════════
+// KALKULASI: MA CROSS (Current TF) — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+maFast = enableMA ? (maFastType == "EMA" ? ta.ema(close, maFastLen) : ta.sma(close, maFastLen)) : float(na)
+maSlow = enableMA ? (maSlowType == "EMA" ? ta.ema(close, maSlowLen) : ta.sma(close, maSlowLen)) : float(na)
+
+maCrossOverRaw  = ta.crossover(maFast,  maSlow)
+maCrossUnderRaw = ta.crossunder(maFast, maSlow)
+
+maCrossUp   = enableMA and maCrossOverRaw
+maCrossDown = enableMA and maCrossUnderRaw
+
+plot(enableMA ? maFast : na, title="Fast MA", color=maFastCol, linewidth=2)
+plot(enableMA ? maSlow : na, title="Slow MA", color=maSlowCol, linewidth=3)
+plotshape(maCrossUp,   title="MA Cross Up",   style=shape.triangleup,   location=location.belowbar, color=color.new(#26A69A, 0), size=size.small)
+plotshape(maCrossDown, title="MA Cross Down", style=shape.triangledown, location=location.abovebar, color=color.new(#EF5350, 0), size=size.small)
+
+// ═══════════════════════════════════════════════════════════════
+// KALKULASI: HTF MA + SUPERTREND 🔒 — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+f_htfMA(src, len, maType) => maType == "EMA" ? ta.ema(src, len) : ta.sma(src, len)
+
+htfFastRaw = request.security(syminfo.tickerid, htfTf, f_htfMA(close, htfMAFastLen, htfMAFastType), lookahead=barmerge.lookahead_off)
+htfSlowRaw = request.security(syminfo.tickerid, htfTf, f_htfMA(close, htfMASlowLen, htfMASlowType), lookahead=barmerge.lookahead_off)
+htfFast = enableHTF and enableHTFMA ? htfFastRaw : float(na)
+htfSlow = enableHTF and enableHTFMA ? htfSlowRaw : float(na)
+
+plot(htfFast, title="HTF Fast MA", color=htfMAFastCol, linewidth=htfMAFastWidth, style=plot.style_stepline)
+plot(htfSlow, title="HTF Slow MA", color=htfMASlowCol, linewidth=htfMASlowWidth, style=plot.style_stepline)
+
+f_htfST(period, mult, mode) =>
+    atrVal_  = ta.atr(period)
+    src_     = hl2
+    up_      = src_ - mult * atrVal_
+    dn_      = src_ + mult * atrVal_
+    var float upF_ = na
+    var float dnF_ = na
+    var int   tr_  = 1
+    if mode == "Adaptive"
+        upF_ := close[1] > nz(upF_[1], up_) ? math.max(up_, nz(upF_[1], up_)) : up_
+        dnF_ := close[1] < nz(dnF_[1], dn_) ? math.min(dn_, nz(dnF_[1], dn_)) : dn_
+    else
+        upF_ := close[1] > nz(upF_[1], up_) ? math.max(up_, nz(upF_[1], up_)) : up_
+        dnF_ := close[1] < nz(dnF_[1], dn_) ? math.min(dn_, nz(dnF_[1], dn_)) : dn_
+    tr_ := nz(tr_[1], 1)
+    tr_ := tr_ == -1 and close > nz(dnF_[1], dn_) ? 1 : tr_ == 1 and close < nz(upF_[1], up_) ? -1 : tr_
+    [upF_, dnF_, tr_]
+
+[htfUpF, htfDnF, htfTrend] = request.security(syminfo.tickerid, htfTf, f_htfST(htfSTPeriod, htfSTMult, htfSTMode), lookahead=barmerge.lookahead_off)
+
+htfUpPlot  = plot(enableHTF and enableHTFST and htfTrend == 1  ? htfUpF : na, title="HTF ST Up",   style=plot.style_stepline, linewidth=htfSTWidth, color=htfSTBullCol)
+htfDnPlot  = plot(enableHTF and enableHTFST and htfTrend == -1 ? htfDnF : na, title="HTF ST Down", style=plot.style_stepline, linewidth=htfSTWidth, color=htfSTBearCol)
+htfMPlot = plot(enableHTF and enableHTFST ? ohlc4 : na, title="HTF ST Highlighter Anchor", style=plot.style_circles, linewidth=1, display=display.none)
+
+htfLongFill  = htfSTHighlight and enableHTF and enableHTFST and htfTrend == 1  ? color.new(htfSTBullCol, 92) : na
+htfShortFill = htfSTHighlight and enableHTF and enableHTFST and htfTrend == -1 ? color.new(htfSTBearCol, 92) : na
+fill(htfMPlot, htfUpPlot,  title="HTF ST Uptrend Highlight",   color=htfLongFill)
+fill(htfMPlot, htfDnPlot,  title="HTF ST Downtrend Highlight", color=htfShortFill)
+
+// ═══════════════════════════════════════════════════════════════
+// KALKULASI: SUPERTREND (Current TF) 🔒 — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+var float stClassicAtr  = na
+var float stCUp         = na
+var float stCDn         = na
+var float stCUpFinal    = na
+var float stCDnFinal    = na
+var int   stCTrend      = 1
+
+if enableST and stMode == "Classic"
+    stClassicAtr := stClassicAtrSma ? ta.sma(ta.tr(true), stClassicPeriod) : ta.atr(stClassicPeriod)
+    stCUp        := stClassicSrcInput - stClassicMult * stClassicAtr
+    stCDn        := stClassicSrcInput + stClassicMult * stClassicAtr
+    stCUpFinal   := close[1] > nz(stCUpFinal[1], stCUp) ? math.max(stCUp, nz(stCUpFinal[1], stCUp)) : stCUp
+    stCDnFinal   := close[1] < nz(stCDnFinal[1], stCDn) ? math.min(stCDn, nz(stCDnFinal[1], stCDn)) : stCDn
+    stCTrend     := nz(stCTrend[1], 1)
+    stCTrend     := stCTrend == -1 and close > nz(stCDnFinal[1], stCDn) ? 1 : stCTrend == 1 and close < nz(stCUpFinal[1], stCUp) ? -1 : stCTrend
+
+stCBuySignal  = enableST and stMode == "Classic" and stCTrend == 1  and nz(stCTrend[1], 1) == -1
+stCSellSignal = enableST and stMode == "Classic" and stCTrend == -1 and nz(stCTrend[1], 1) == 1
+
+stCUpPlot  = plot(enableST and stMode == "Classic" and stCTrend == 1  ? stCUpFinal : na, title="ST Classic Up",   style=plot.style_linebr, linewidth=2, color=stBullCol)
+stCDnPlot  = plot(enableST and stMode == "Classic" and stCTrend == -1 ? stCDnFinal : na, title="ST Classic Down", style=plot.style_linebr, linewidth=2, color=stBearCol)
+plotshape(stShowSignals and stCBuySignal  ? stCUpFinal : na, title="ST Classic Buy",  text="Buy",  location=location.absolute, style=shape.labelup,   size=size.tiny, color=stBullCol, textcolor=color.white)
+plotshape(stShowSignals and stCSellSignal ? stCDnFinal : na, title="ST Classic Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=stBearCol, textcolor=color.white)
+
+var float stAdaptAtr = na
+var float stAUp      = na
+var float stADn      = na
+var float stAUpFinal = na
+var float stADnFinal = na
+var int   stATrend   = 1
+
+if enableST and stMode == "Adaptive"
+    stAdaptAtr := stAdaptAtrSma ? ta.sma(ta.tr(true), stAdaptPeriod) : ta.atr(stAdaptPeriod)
+    stAUp      := stAdaptSrcInput - stAdaptMult * stAdaptAtr
+    stADn      := stAdaptSrcInput + stAdaptMult * stAdaptAtr
+    stAUpFinal := close[1] > nz(stAUpFinal[1], stAUp) ? math.max(stAUp, nz(stAUpFinal[1], stAUp)) : stAUp
+    stADnFinal := close[1] < nz(stADnFinal[1], stADn) ? math.min(stADn, nz(stADnFinal[1], stADn)) : stADn
+    stATrend   := nz(stATrend[1], 1)
+    stATrend   := stATrend == -1 and close > nz(stADnFinal[1], stADn) ? 1 : stATrend == 1 and close < nz(stAUpFinal[1], stAUp) ? -1 : stATrend
+
+stABuySignal  = enableST and stMode == "Adaptive" and stATrend == 1  and nz(stATrend[1], 1) == -1
+stASellSignal = enableST and stMode == "Adaptive" and stATrend == -1 and nz(stATrend[1], 1) == 1
+
+stAUpPlot  = plot(enableST and stMode == "Adaptive" and stATrend == 1  ? stAUpFinal : na, title="ST Adaptive Up",   style=plot.style_linebr, linewidth=2, color=stBullCol)
+stADnPlot  = plot(enableST and stMode == "Adaptive" and stATrend == -1 ? stADnFinal : na, title="ST Adaptive Down", style=plot.style_linebr, linewidth=2, color=stBearCol)
+plotshape(stShowSignals and stABuySignal  ? stAUpFinal : na, title="ST Adaptive Buy",  text="Buy",  location=location.absolute, style=shape.labelup,   size=size.tiny, color=stBullCol, textcolor=color.white)
+plotshape(stShowSignals and stASellSignal ? stADnFinal : na, title="ST Adaptive Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=stBearCol, textcolor=color.white)
+
+stMPlot = plot(enableST ? ohlc4 : na, title="ST Highlighter Anchor", style=plot.style_circles, linewidth=1, display=display.none)
+
+stLongFillColC  = stHighlighting and stMode == "Classic"  and stCTrend == 1  ? color.new(stBullCol, 85) : na
+stShortFillColC = stHighlighting and stMode == "Classic"  and stCTrend == -1 ? color.new(stBearCol, 85) : na
+stLongFillColA  = stHighlighting and stMode == "Adaptive" and stATrend == 1  ? color.new(stBullCol, 85) : na
+stShortFillColA = stHighlighting and stMode == "Adaptive" and stATrend == -1 ? color.new(stBearCol, 85) : na
+
+fill(stMPlot, stCUpPlot, title="ST Classic Uptrend Highlighter",    color=stLongFillColC)
+fill(stMPlot, stCDnPlot, title="ST Classic Downtrend Highlighter",  color=stShortFillColC)
+fill(stMPlot, stAUpPlot, title="ST Adaptive Uptrend Highlighter",   color=stLongFillColA)
+fill(stMPlot, stADnPlot, title="ST Adaptive Downtrend Highlighter", color=stShortFillColA)
+
+// ═══════════════════════════════════════════════════════════════
+// FILTER TREND VISUAL — KALKULASI GATE — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+stCurrentTrend = stMode == "Classic" ? stCTrend : stATrend
+
+bullTrendEmaOk = not enableEmaTrendFilter or not enableMA or close > maSlow
+bearTrendEmaOk = not enableEmaTrendFilter or not enableMA or close < maSlow
+
+bullTrendStOk  = not enableStTrendFilter or not enableST or stCurrentTrend == 1
+bearTrendStOk  = not enableStTrendFilter or not enableST or stCurrentTrend == -1
+
+f_lookbackOk(refBar, refTime) =>
+    visualLookbackMode == "Bar Count" ? (last_bar_index - refBar) <= visualLookbackBars : (refTime >= (timenow - visualLookbackDays * 86400000))
+
+showByLookback = true
+
+bullWaveVisible = bullTrendEmaOk and bullTrendStOk
+bearWaveVisible = bearTrendEmaOk and bearTrendStOk
+
+// ═══════════════════════════════════════════════════════════════
+// KALKULASI PIVOT UTAMA — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+ph = ta.pivothigh(high, leftBars,  rightBars)
+pl = ta.pivotlow(low,  leftBars,  rightBars)
+
+phA = enableAFractal ? ta.pivothigh(high, aLeftBars, aRightBars) : float(na)
+plA = enableAFractal ? ta.pivotlow(low,  aLeftBars, aRightBars)  : float(na)
+
+phC = enableCFractal ? ta.pivothigh(high, cLeftBars, cRightBars) : float(na)
+plC = enableCFractal ? ta.pivotlow(low,  cLeftBars, cRightBars)  : float(na)
+
+atrVal = ta.atr(atrLen)
+
+_atr14       = ta.atr(14)
+_useOffset   = labelOffsetMode == "Adaptive"
+offA         = _useOffset ? _atr14 * labelOffA : 0.0
+offB         = _useOffset ? _atr14 * labelOffB : 0.0
+offC         = _useOffset ? _atr14 * labelOffC : 0.0
+
+var float lastPivotHigh    = na
+var int   lastPivotHighBar = na
+var float lastPivotLow     = na
+var int   lastPivotLowBar  = na
+
+var float lastAPivotHigh    = na
+var int   lastAPivotHighBar = na
+var float lastAPivotLow     = na
+var int   lastAPivotLowBar  = na
+
+var float lastCPivotHigh    = na
+var int   lastCPivotHighBar = na
+var float lastCPivotLow     = na
+var int   lastCPivotLowBar  = na
+
+var float snapLowAtHigh_val = na
+var int   snapLowAtHigh_bar = na
+var float snapHighAtLow_val = na
+var int   snapHighAtLow_bar = na
+
+if enableAFractal
+    if not na(phA)
+        lastAPivotHigh    := phA
+        lastAPivotHighBar := bar_index - aRightBars
+    if not na(plA)
+        lastAPivotLow     := plA
+        lastAPivotLowBar  := bar_index - aRightBars
+
+if enableCFractal
+    if not na(phC)
+        lastCPivotHigh    := phC
+        lastCPivotHighBar := bar_index - cRightBars
+    if not na(plC)
+        lastCPivotLow     := plC
+        lastCPivotLowBar  := bar_index - cRightBars
+
+if not na(ph)
+    snapLowAtHigh_val := enableAFractal ? lastAPivotLow    : lastPivotLow
+    snapLowAtHigh_bar := enableAFractal ? lastAPivotLowBar : lastPivotLowBar
+    lastPivotHigh     := ph
+    lastPivotHighBar  := bar_index - rightBars
+if not na(pl)
+    snapHighAtLow_val := enableAFractal ? lastAPivotHigh    : lastPivotHigh
+    snapHighAtLow_bar := enableAFractal ? lastAPivotHighBar : lastPivotHighBar
+    lastPivotLow      := pl
+    lastPivotLowBar   := bar_index - rightBars
+
+plotshape(showPivotMarkers and not na(ph), title="Pivot High", style=shape.triangledown, location=location.abovebar, color=pivotHighCol, size=size.tiny, offset=-rightBars)
+plotshape(showPivotMarkers and not na(pl), title="Pivot Low",  style=shape.triangleup,   location=location.belowbar, color=pivotLowCol,  size=size.tiny, offset=-rightBars)
+
+// ═══════════════════════════════════════════════════════════════
+// SMI INTERNAL — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+emaEma(s, l) => ta.ema(ta.ema(s, l), l)
+var float smi    = na
+var float smiEma = na
+if enableSmiFilter
+    hh_s   = ta.highest(smiLenK)
+    ll_s   = ta.lowest(smiLenK)
+    rel_s  = close - (hh_s + ll_s) / 2
+    rng_s  = hh_s - ll_s
+    smi    := 200 * (emaEma(rel_s, smiLenD) / emaEma(rng_s, smiLenD))
+    smiEma := ta.ema(smi, smiLenE)
+
+// ═══════════════════════════════════════════════════════════════
+// RAW CANDIDATE — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+rawBullCandidate = not na(lastPivotHigh) and close > lastPivotHigh
+rawBearCandidate = not na(lastPivotLow)  and close < lastPivotLow
+
+plotshape(showRawCandidates and rawBullCandidate, title="Raw Bull", style=shape.circle, location=location.belowbar, color=rawBullCol, size=size.tiny)
+plotshape(showRawCandidates and rawBearCandidate, title="Raw Bear", style=shape.circle, location=location.abovebar, color=rawBearCol, size=size.tiny)
+
+reqN = enablePersistFilter ? persistN : 1
+
+filterTag      = (enableAtrFilter ? "ATR " : "") + (enablePersistFilter ? "Persist(" + str.tostring(persistN) + ") " : "") + (enableStructFilter ? "Str " : "") + (enableSmiFilter ? "SMI " : "") + (enableAFractal ? "A1 " : "") + (enableADist ? "A2 " : "") + (enableALookback ? "A3 " : "") + (enableCFractal ? "C1 " : "") + (enableFiboBC ? "C2 " : "")
+filterTagFinal = filterTag == "" ? "Raw" : str.trim(filterTag)
+
+activeTierCol = enableStructFilter ? colTierStruct : enableSmiFilter ? colTierSmi : enablePersistFilter ? colTierPersist : enableAtrFilter ? colTierAtr : colTierRaw
+finalBullCol  = useFilterTierColor ? activeTierCol : bullBreakCol
+finalBearCol  = useFilterTierColor ? activeTierCol : bearBreakCol
+
+bLineColTracking = color.new(bLineCol, 55)
+
+var int lastConfirmedBullB = na
+var int lastConfirmedBearB = na
+
+cBullFractalOk(cBar) => not enableCFractal or (not na(lastCPivotLowBar) and math.abs(lastCPivotLowBar - cBar) <= (cRightBars - rightBars))
+cBearFractalOk(cBar) => not enableCFractal or (not na(lastCPivotHighBar) and math.abs(lastCPivotHighBar - cBar) <= (cRightBars - rightBars))
+
+// ═══════════════════════════════════════════════════════════════
+// [v10] A3 PRECOMPUTE — dihitung global tiap bar (aman buat loop)
+// ═══════════════════════════════════════════════════════════════
+_a3BullValRaw = ta.lowest(low, aLookbackBars)[rightBars]
+_a3BullBarRaw = bar_index - rightBars - ta.lowestbars(low, aLookbackBars)[rightBars]
+_a3BearValRaw = ta.highest(high, aLookbackBars)[rightBars]
+_a3BearBarRaw = bar_index - rightBars - ta.highestbars(high, aLookbackBars)[rightBars]
+
+// ═══════════════════════════════════════════════════════════════
+// [v10] TIPE KANDIDAT + ARRAY MULTI-SLOT
+// ═══════════════════════════════════════════════════════════════
+type Cand
+    float aVal
+    int   aBar
+    float bVal
+    int   bBar
+    float cVal
+    int   cBar
+    bool  active  = false
+    int   persist = 0
+    line  bLine   = na
+
+var array<Cand> bullCands = array.new<Cand>()
+var array<Cand> bearCands = array.new<Cand>()
+
+MAX_CAND = 8
+
+f_pushCand(array<Cand> arr, Cand c) =>
+    array.push(arr, c)
+    if array.size(arr) > MAX_CAND
+        old = array.shift(arr)
+        if not na(old.bLine)
+            line.delete(old.bLine)
+
+// ═══════════════════════════════════════════════════════════════
+// [v10] ARRAY RIWAYAT VISUAL (break line/label, leg D, D label, ✖)
+// ═══════════════════════════════════════════════════════════════
+BREAK_HISTORY_CAP = 200
+
+var line[]  bullBreakLineArr  = array.new<line>()
+var int[]   bullBreakLnBarArr = array.new<int>()
+var int[]   bullBreakLnTimeArr= array.new<int>()
+var label[] bullBreakLblArr   = array.new<label>()
+var int[]   bullBreakLbBarArr = array.new<int>()
+var int[]   bullBreakLbTimeArr= array.new<int>()
+
+var line[]  bearBreakLineArr  = array.new<line>()
+var int[]   bearBreakLnBarArr = array.new<int>()
+var int[]   bearBreakLnTimeArr= array.new<int>()
+var label[] bearBreakLblArr   = array.new<label>()
+var int[]   bearBreakLbBarArr = array.new<int>()
+var int[]   bearBreakLbTimeArr= array.new<int>()
+
+var label[] failLblArr = array.new<label>()
+
+f_pushLineFade(array<line> arrLn, array<int> arrBar, array<int> arrTime, line ln) =>
+    array.push(arrLn, ln)
+    array.push(arrBar, bar_index)
+    array.push(arrTime, time)
+    if array.size(arrLn) > BREAK_HISTORY_CAP
+        old = array.shift(arrLn)
+        array.shift(arrBar)
+        array.shift(arrTime)
+        if not na(old)
+            line.delete(old)
+
+f_pushLabelFade(array<label> arrLb, array<int> arrBar, array<int> arrTime, label lb) =>
+    array.push(arrLb, lb)
+    array.push(arrBar, bar_index)
+    array.push(arrTime, time)
+    if array.size(arrLb) > BREAK_HISTORY_CAP
+        old = array.shift(arrLb)
+        array.shift(arrBar)
+        array.shift(arrTime)
+        if not na(old)
+            label.delete(old)
+
+f_pushLabelCapped(array<label> arrLb, label lb) =>
+    array.push(arrLb, lb)
+    if array.size(arrLb) > BREAK_HISTORY_CAP
+        old = array.shift(arrLb)
+        if not na(old)
+            label.delete(old)
+
+f_fadeLines(array<line> arrLn, array<int> arrBar, array<int> arrTime, color col) =>
+    if array.size(arrLn) > 0
+        for i = 0 to array.size(arrLn) - 1
+            ln = array.get(arrLn, i)
+            if not na(ln)
+                visOk = f_lookbackOk(array.get(arrBar, i), array.get(arrTime, i))
+                line.set_color(ln, visOk ? col : color.new(col, 100))
+
+f_fadeLabels(array<label> arrLb, array<int> arrBar, array<int> arrTime, color col) =>
+    if array.size(arrLb) > 0
+        for i = 0 to array.size(arrLb) - 1
+            lb = array.get(arrLb, i)
+            if not na(lb)
+                visOk = f_lookbackOk(array.get(arrBar, i), array.get(arrTime, i))
+                label.set_textcolor(lb, visOk ? col : color.new(col, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// HELPER TRACKER — isi persis v6.10.2
+// ═══════════════════════════════════════════════════════════════
+f_del_line(line ln) =>
+    if not na(ln)
+        line.delete(ln)
+    line(na)
+
+f_del_label(label lb) =>
+    if not na(lb)
+        label.delete(lb)
+    label(na)
+
+f_del_box(box bx) =>
+    if not na(bx)
+        box.delete(bx)
+    box(na)
+
+f_bullZoneColor(val, zTop, zBot, colGray, colGreen, colOrange) =>
+    na(val) ? colGray : val > zTop ? colGray : val >= zBot ? colGreen : colOrange
+
+f_bearZoneColor(val, zTop, zBot, colGray, colGreen, colOrange) =>
+    na(val) ? colGray : val < zBot ? colGray : val <= zTop ? colGreen : colOrange
+
+// ═══════════════════════════════════════════════════════════════
+// OTAK 1 — TRACKER BULL (v10)
+// Delta v10: phase 2 (leg D live) DIHAPUS. C terkunci → push Cand
+// snapshot beku ke bullCands → slot bebas (tbPhase=0) di KEDUA mode.
+// tbWatch dihapus (juri gak lagi baca var global tracker).
+// ═══════════════════════════════════════════════════════════════
+var int   tbPhase = 0
+var float tbA     = na
+var int   tbABar  = na
+var float tbB     = na
+var int   tbBBar  = na
+var float tbC     = na
+var int   tbCBar  = na
+var line  tbAB    = na
+var line  tbBC    = na
+var label tbLA    = na
+var label tbLB    = na
+var label tbLC    = na
+var box   tbFiboBox      = na
+var color tbFiboStateCol = na
+var bool  tbFiboSolid    = false
+var bool  tbC2Valid      = true
+
+tbBnew    = ph
+tbBnewBar = bar_index - rightBars
+tbAnew    = snapLowAtHigh_val
+tbAnewBar = snapLowAtHigh_bar
+tbStartOk = showAbcd and tbPhase == 0 and not na(ph) and not na(tbAnew) and not na(tbAnewBar) and tbAnew < tbBnew and tbAnewBar < tbBnewBar
+
+if tbStartOk
+    tbAB := f_del_line(tbAB)
+    tbBC := f_del_line(tbBC)
+    tbLA := f_del_label(tbLA)
+    tbLB := f_del_label(tbLB)
+    tbLC := f_del_label(tbLC)
+    tbFiboBox := f_del_box(tbFiboBox)
+    tbFiboSolid := false
+    tbC2Valid   := true
+    tbA    := tbAnew
+    tbABar := tbAnewBar
+    tbB    := tbBnew
+    tbBBar := tbBnewBar
+    tbC    := na
+    tbCBar := na
+    for k = 0 to rightBars - 1
+        if bar_index - k > tbBBar
+            if na(tbC) or low[k] < tbC
+                tbC    := low[k]
+                tbCBar := bar_index - k
+    tbAB := line.new(tbABar, tbA, tbBBar, tbB, xloc=xloc.bar_index, color=abcdBullCol, width=abcdWidth, style=line.style_solid)
+    tbBC := line.new(tbBBar, tbB, tbCBar, tbC, xloc=xloc.bar_index, color=tbBCcol, width=abcdWidth, style=line.style_dashed)
+    if showAbcdTags
+        tbLA := label.new(tbABar, tbA - offA, text="A",  color=color.new(color.black, 100), textcolor=abcdBullCol, style=label.style_label_up,   size=labelSizeABC)
+        tbLB := label.new(tbBBar, tbB + offB, text="B",  color=color.new(color.black, 100), textcolor=abcdBullCol, style=label.style_label_down, size=labelSizeABC)
+        tbLC := label.new(tbCBar, tbC - offC, text="C?", color=color.new(color.black, 100), textcolor=tbBCcol,     style=label.style_label_up,   size=labelSizeABC)
+    if enableFiboBC and showFiboZone
+        bzTop0 = tbB - bcFiboMin * (tbB - tbA)
+        bzBot0 = tbB - bcFiboMax * (tbB - tbA)
+        tbFiboStateCol := f_bullZoneColor(tbC, bzTop0, bzBot0, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+        tbFiboBox := box.new(left=tbBBar, top=bzTop0, right=bar_index, bottom=bzBot0, xloc=xloc.bar_index, border_color=na, bgcolor=color.new(fiboZoneGrayCol, fiboZoneTentativeTransp))
+    tbPhase := 1
+
+else if showAbcd and tbPhase > 0
+    if close < tbA
+        tbAB := f_del_line(tbAB)
+        tbBC := f_del_line(tbBC)
+        tbLA := f_del_label(tbLA)
+        tbLB := f_del_label(tbLB)
+        tbLC := f_del_label(tbLC)
+        tbFiboBox := f_del_box(tbFiboBox)
+        tbFiboSolid := false
+        tbC2Valid   := true
+        tbPhase := 0
+    else
+        if tbPhase == 1
+            if na(tbC) or low < tbC
+                tbC    := low
+                tbCBar := bar_index
+                if not na(tbBC)
+                    line.set_xy2(tbBC, tbCBar, tbC)
+                if not na(tbLC)
+                    label.set_xy(tbLC, tbCBar, tbC - offC)
+            if enableFiboBC and showFiboZone and not na(tbFiboBox)
+                bzTop1 = tbB - bcFiboMin * (tbB - tbA)
+                bzBot1 = tbB - bcFiboMax * (tbB - tbA)
+                box.set_right(tbFiboBox, bar_index)
+                tbFiboStateCol := f_bullZoneColor(tbC, bzTop1, bzBot1, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+            tbLockPivot = not na(pl) and (bar_index - rightBars) > tbBBar
+            tbLockBreak = close > tbB
+            if tbLockPivot or tbLockBreak
+                tbCval = tbLockPivot ? pl : tbC
+                tbCbr  = tbLockPivot ? bar_index - rightBars : tbCBar
+                tbOk   = not enableStructFilter or tbCval > tbA
+                if tbOk
+                    tbC    := tbCval
+                    tbCBar := tbCbr
+                    if not na(tbBC)
+                        line.set_xy2(tbBC, tbCBar, tbC)
+                        line.set_style(tbBC, line.style_solid)
+                    if not na(tbLC)
+                        label.set_xy(tbLC, tbCBar, tbC - offC)
+                        label.set_text(tbLC, "C")
+                    if enableFiboBC and showFiboZone and not na(tbFiboBox)
+                        bzTopL = tbB - bcFiboMin * (tbB - tbA)
+                        bzBotL = tbB - bcFiboMax * (tbB - tbA)
+                        tbFiboStateCol := f_bullZoneColor(tbC, bzTopL, bzBotL, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+                        tbFiboSolid    := true
+                        box.set_right(tbFiboBox, tbCBar + fiboBoxExtendBars)
+                        if hideWaveIfC2Invalid
+                            tbC2Valid := tbFiboStateCol == fiboZoneGreenCol
+                    // [v10] snapshot BEKU → kandidat baru buat Otak 2
+                    f_pushCand(bullCands, Cand.new(tbA, tbABar, tbB, tbBBar, tbC, tbCBar))
+                    // [v10] slot bebas di KEDUA mode (unifikasi ABC/ABCD)
+                    tbAB := na
+                    tbBC := na
+                    tbLA := na
+                    tbLB := na
+                    tbLC := na
+                    tbFiboBox := na
+                    tbPhase := 0
+                else
+                    tbAB := f_del_line(tbAB)
+                    tbBC := f_del_line(tbBC)
+                    tbLA := f_del_label(tbLA)
+                    tbLB := f_del_label(tbLB)
+                    tbLC := f_del_label(tbLC)
+                    tbFiboBox := f_del_box(tbFiboBox)
+                    tbFiboSolid := false
+                    tbC2Valid   := true
+                    tbPhase := 0
+
+bullWaveVisibleCur = bullWaveVisible and tbC2Valid and not (hideWaveDuringCPending and tbPhase == 1)
+if not na(tbAB)
+    line.set_color(tbAB, bullWaveVisibleCur ? abcdBullCol : color.new(abcdBullCol, 100))
+if not na(tbBC)
+    line.set_color(tbBC, bullWaveVisibleCur ? tbBCcol : color.new(tbBCcol, 100))
+if not na(tbLA)
+    label.set_textcolor(tbLA, bullWaveVisibleCur ? abcdBullCol : color.new(abcdBullCol, 100))
+if not na(tbLB)
+    label.set_textcolor(tbLB, bullWaveVisibleCur ? abcdBullCol : color.new(abcdBullCol, 100))
+if not na(tbLC)
+    label.set_textcolor(tbLC, bullWaveVisibleCur ? tbBCcol : color.new(tbBCcol, 100))
+
+if not na(tbFiboBox)
+    tbFiboBgTransp = tbFiboSolid ? fiboZoneSolidTransp : fiboZoneTentativeTransp
+    box.set_bgcolor(tbFiboBox, bullWaveVisible ? color.new(tbFiboStateCol, tbFiboBgTransp) : color.new(tbFiboStateCol, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// OTAK 1 — TRACKER BEAR (v10) — mirror bull, delta sama persis
+// ═══════════════════════════════════════════════════════════════
+var int   trPhase = 0
+var float trA     = na
+var int   trABar  = na
+var float trB     = na
+var int   trBBar  = na
+var float trC     = na
+var int   trCBar  = na
+var line  trAB    = na
+var line  trBC    = na
+var label trLA    = na
+var label trLB    = na
+var label trLC    = na
+var box   trFiboBox      = na
+var color trFiboStateCol = na
+var bool  trFiboSolid    = false
+var bool  trC2Valid      = true
+
+trBnew    = pl
+trBnewBar = bar_index - rightBars
+trAnew    = snapHighAtLow_val
+trAnewBar = snapHighAtLow_bar
+trStartOk = showAbcd and trPhase == 0 and not na(pl) and not na(trAnew) and not na(trAnewBar) and trAnew > trBnew and trAnewBar < trBnewBar
+
+if trStartOk
+    trAB := f_del_line(trAB)
+    trBC := f_del_line(trBC)
+    trLA := f_del_label(trLA)
+    trLB := f_del_label(trLB)
+    trLC := f_del_label(trLC)
+    trFiboBox := f_del_box(trFiboBox)
+    trFiboSolid := false
+    trC2Valid   := true
+    trA    := trAnew
+    trABar := trAnewBar
+    trB    := trBnew
+    trBBar := trBnewBar
+    trC    := na
+    trCBar := na
+    for k = 0 to rightBars - 1
+        if bar_index - k > trBBar
+            if na(trC) or high[k] > trC
+                trC    := high[k]
+                trCBar := bar_index - k
+    trAB := line.new(trABar, trA, trBBar, trB, xloc=xloc.bar_index, color=abcdBearCol, width=abcdWidth, style=line.style_solid)
+    trBC := line.new(trBBar, trB, trCBar, trC, xloc=xloc.bar_index, color=trBCcol, width=abcdWidth, style=line.style_dashed)
+    if showAbcdTags
+        trLA := label.new(trABar, trA + offA, text="A",  color=color.new(color.black, 100), textcolor=abcdBearCol, style=label.style_label_down, size=labelSizeABC)
+        trLB := label.new(trBBar, trB - offB, text="B",  color=color.new(color.black, 100), textcolor=abcdBearCol, style=label.style_label_up,   size=labelSizeABC)
+        trLC := label.new(trCBar, trC + offC, text="C?", color=color.new(color.black, 100), textcolor=trBCcol,     style=label.style_label_down, size=labelSizeABC)
+    if enableFiboBC and showFiboZone
+        bzBot0B = trB + bcFiboMin * (trA - trB)
+        bzTop0B = trB + bcFiboMax * (trA - trB)
+        trFiboStateCol := f_bearZoneColor(trC, bzTop0B, bzBot0B, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+        trFiboBox := box.new(left=trBBar, top=bzTop0B, right=bar_index, bottom=bzBot0B, xloc=xloc.bar_index, border_color=na, bgcolor=color.new(fiboZoneGrayCol, fiboZoneTentativeTransp))
+    trPhase := 1
+
+else if showAbcd and trPhase > 0
+    if close > trA
+        trAB := f_del_line(trAB)
+        trBC := f_del_line(trBC)
+        trLA := f_del_label(trLA)
+        trLB := f_del_label(trLB)
+        trLC := f_del_label(trLC)
+        trFiboBox := f_del_box(trFiboBox)
+        trFiboSolid := false
+        trC2Valid   := true
+        trPhase := 0
+    else
+        if trPhase == 1
+            if na(trC) or high > trC
+                trC    := high
+                trCBar := bar_index
+                if not na(trBC)
+                    line.set_xy2(trBC, trCBar, trC)
+                if not na(trLC)
+                    label.set_xy(trLC, trCBar, trC + offC)
+            if enableFiboBC and showFiboZone and not na(trFiboBox)
+                bzBot1B = trB + bcFiboMin * (trA - trB)
+                bzTop1B = trB + bcFiboMax * (trA - trB)
+                box.set_right(trFiboBox, bar_index)
+                trFiboStateCol := f_bearZoneColor(trC, bzTop1B, bzBot1B, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+            trLockPivot = not na(ph) and (bar_index - rightBars) > trBBar
+            trLockBreak = close < trB
+            if trLockPivot or trLockBreak
+                trCval = trLockPivot ? ph : trC
+                trCbr  = trLockPivot ? bar_index - rightBars : trCBar
+                trOk   = not enableStructFilter or trCval < trA
+                if trOk
+                    trC    := trCval
+                    trCBar := trCbr
+                    if not na(trBC)
+                        line.set_xy2(trBC, trCBar, trC)
+                        line.set_style(trBC, line.style_solid)
+                    if not na(trLC)
+                        label.set_xy(trLC, trCBar, trC + offC)
+                        label.set_text(trLC, "C")
+                    if enableFiboBC and showFiboZone and not na(trFiboBox)
+                        bzBotLB = trB + bcFiboMin * (trA - trB)
+                        bzTopLB = trB + bcFiboMax * (trA - trB)
+                        trFiboStateCol := f_bearZoneColor(trC, bzTopLB, bzBotLB, fiboZoneGrayCol, fiboZoneGreenCol, fiboZoneOrangeCol)
+                        trFiboSolid    := true
+                        box.set_right(trFiboBox, trCBar + fiboBoxExtendBars)
+                        if hideWaveIfC2Invalid
+                            trC2Valid := trFiboStateCol == fiboZoneGreenCol
+                    // [v10] snapshot BEKU → kandidat baru buat Otak 2
+                    f_pushCand(bearCands, Cand.new(trA, trABar, trB, trBBar, trC, trCBar))
+                    // [v10] slot bebas di KEDUA mode (unifikasi ABC/ABCD)
+                    trAB := na
+                    trBC := na
+                    trLA := na
+                    trLB := na
+                    trLC := na
+                    trFiboBox := na
+                    trPhase := 0
+                else
+                    trAB := f_del_line(trAB)
+                    trBC := f_del_line(trBC)
+                    trLA := f_del_label(trLA)
+                    trLB := f_del_label(trLB)
+                    trLC := f_del_label(trLC)
+                    trFiboBox := f_del_box(trFiboBox)
+                    trFiboSolid := false
+                    trC2Valid   := true
+                    trPhase := 0
+
+bearWaveVisibleCur = bearWaveVisible and trC2Valid and not (hideWaveDuringCPending and trPhase == 1)
+if not na(trAB)
+    line.set_color(trAB, bearWaveVisibleCur ? abcdBearCol : color.new(abcdBearCol, 100))
+if not na(trBC)
+    line.set_color(trBC, bearWaveVisibleCur ? trBCcol : color.new(trBCcol, 100))
+if not na(trLA)
+    label.set_textcolor(trLA, bearWaveVisibleCur ? abcdBearCol : color.new(abcdBearCol, 100))
+if not na(trLB)
+    label.set_textcolor(trLB, bearWaveVisibleCur ? abcdBearCol : color.new(abcdBearCol, 100))
+if not na(trLC)
+    label.set_textcolor(trLC, bearWaveVisibleCur ? trBCcol : color.new(trBCcol, 100))
+
+if not na(trFiboBox)
+    trFiboBgTransp = trFiboSolid ? fiboZoneSolidTransp : fiboZoneTentativeTransp
+    box.set_bgcolor(trFiboBox, bearWaveVisible ? color.new(trFiboStateCol, trFiboBgTransp) : color.new(trFiboStateCol, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// OTAK 2 — JURI BULL (v10, multi-slot)
+// Loop semua kandidat tiap bar. Tiap kandidat: data beku sendiri,
+// juri sendiri, nasib sendiri. Confirm wajib barstate.isconfirmed.
+// ═══════════════════════════════════════════════════════════════
+if array.size(bullCands) > 0
+    for i = array.size(bullCands) - 1 to 0
+        c = array.get(bullCands, i)
+
+        // Batal total: harga jatuh bawah A sebelum kandidat aktif
+        if not c.active and close < c.aVal
+            if not na(c.bLine)
+                line.delete(c.bLine)
+            array.remove(bullCands, i)
+            continue
+
+        // Aktivasi: breakout level B kandidat + buffer ATR
+        justAct = false
+        if not c.active and close > c.bVal
+            distOk = not enableAtrFilter or (close - c.bVal) >= atrMult * atrVal
+            if distOk
+                c.active  := true
+                c.persist := 1
+                justAct   := true
+                if enableALookback
+                    c.aVal := _a3BullValRaw
+                    c.aBar := _a3BullBarRaw
+                if showBLine
+                    c.bLine := line.new(c.bBar, c.bVal, bar_index, c.bVal, xloc=xloc.bar_index, color=bLineColTracking, width=bLineWidth, style=line.style_dashed)
+
+        // Pemantauan: bertahan di atas B + buffer ATR tiap bar
+        if c.active and not justAct
+            if not na(c.bLine)
+                line.set_x2(c.bLine, bar_index)
+            stillBeyond = close > c.bVal
+            distOk2     = not enableAtrFilter or (close - c.bVal) >= atrMult * atrVal
+            if stillBeyond and distOk2
+                c.persist := c.persist + 1
+            else
+                // Gugur buffer: jejak dotted abu + tanda ✖ (gak hilang diam-diam)
+                if not na(c.bLine)
+                    line.set_x2(c.bLine, bar_index)
+                    line.set_style(c.bLine, line.style_dotted)
+                    line.set_color(c.bLine, color.new(bLineCol, 60))
+                    c.bLine := na
+                if showFailMark and bullWaveVisible
+                    lbF = label.new(bar_index, low, text="✖", color=color.new(color.black, 100), textcolor=color.new(bLineCol, 40), style=label.style_label_up, size=size.small)
+                    f_pushLabelCapped(failLblArr, lbF)
+                c.active  := false
+                c.persist := 0
+
+        // Evaluasi confirm
+        if c.active
+            smiOk    = not enableSmiFilter or (smi >= smiEma)
+            timeOk   = c.persist >= reqN
+            cValid   = not na(c.cBar) and c.cBar > c.bBar and c.cBar < bar_index
+            aValid   = not na(c.aBar)
+            distAOk  = not enableADist or (aValid and (c.bVal - c.aVal) >= aDistMult * atrVal)
+            structOk = not enableStructFilter or (aValid and cValid and c.cVal > c.aVal)
+            cFrOk    = not cValid or cBullFractalOk(c.cBar)
+            fiboOk   = true
+            retr     = float(na)
+            if enableFiboBC and aValid and cValid
+                legAB = c.bVal - c.aVal
+                retr := legAB > 0 ? (c.bVal - c.cVal) / legAB : 0.0
+                fiboOk := retr >= bcFiboMin and retr <= bcFiboMax
+            confirmed = barstate.isconfirmed and timeOk and smiOk and structOk and distAOk and cFrOk and fiboOk
+            if confirmed
+                isDup = noDuplicate and not na(lastConfirmedBullB) and c.bBar == lastConfirmedBullB
+                if isDup
+                    if not na(c.bLine)
+                        line.delete(c.bLine)
+                    array.remove(bullCands, i)
+                    continue
+                lastConfirmedBullB := c.bBar
+                if not na(c.bLine)
+                    line.set_x2(c.bLine, bar_index)
+                    line.set_color(c.bLine, bLineCol)
+                if showBreakLine and bullWaveVisible
+                    newLn = line.new(c.bBar, c.bVal, bar_index, high, xloc=xloc.bar_index, color=finalBullCol, width=breakLineWidth)
+                    f_pushLineFade(bullBreakLineArr, bullBreakLnBarArr, bullBreakLnTimeArr, newLn)
+                if showBreakLabel and bullWaveVisible
+                    fiboInfo = enableFiboBC and not na(retr) ? " C:" + str.tostring(math.round(retr * 100, 1)) + "%" : ""
+                    breakTxt = showFilterTag ? "BREAK" + fiboInfo + "\n" + filterTagFinal : "BREAK" + fiboInfo
+                    newLb = label.new(bar_index, high, text=breakTxt, color=color.new(color.black, 100), textcolor=finalBullCol, style=label.style_label_down, size=size.normal)
+                    f_pushLabelFade(bullBreakLblArr, bullBreakLbBarArr, bullBreakLbTimeArr, newLb)
+                array.remove(bullCands, i)
+                continue
+
+        // Gate visibilitas trend buat level B live
+        if not na(c.bLine)
+            line.set_color(c.bLine, bullWaveVisible ? bLineColTracking : color.new(bLineCol, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// OTAK 2 — JURI BEAR (v10, multi-slot) — mirror bull
+// ═══════════════════════════════════════════════════════════════
+if array.size(bearCands) > 0
+    for i = array.size(bearCands) - 1 to 0
+        c = array.get(bearCands, i)
+
+        if not c.active and close > c.aVal
+            if not na(c.bLine)
+                line.delete(c.bLine)
+            array.remove(bearCands, i)
+            continue
+
+        justAct = false
+        if not c.active and close < c.bVal
+            distOk = not enableAtrFilter or (c.bVal - close) >= atrMult * atrVal
+            if distOk
+                c.active  := true
+                c.persist := 1
+                justAct   := true
+                if enableALookback
+                    c.aVal := _a3BearValRaw
+                    c.aBar := _a3BearBarRaw
+                if showBLine
+                    c.bLine := line.new(c.bBar, c.bVal, bar_index, c.bVal, xloc=xloc.bar_index, color=bLineColTracking, width=bLineWidth, style=line.style_dashed)
+
+        if c.active and not justAct
+            if not na(c.bLine)
+                line.set_x2(c.bLine, bar_index)
+            stillBeyond = close < c.bVal
+            distOk2     = not enableAtrFilter or (c.bVal - close) >= atrMult * atrVal
+            if stillBeyond and distOk2
+                c.persist := c.persist + 1
+            else
+                if not na(c.bLine)
+                    line.set_x2(c.bLine, bar_index)
+                    line.set_style(c.bLine, line.style_dotted)
+                    line.set_color(c.bLine, color.new(bLineCol, 60))
+                    c.bLine := na
+                if showFailMark and bearWaveVisible
+                    lbF = label.new(bar_index, high, text="✖", color=color.new(color.black, 100), textcolor=color.new(bLineCol, 40), style=label.style_label_down, size=size.small)
+                    f_pushLabelCapped(failLblArr, lbF)
+                c.active  := false
+                c.persist := 0
+
+        if c.active
+            smiOk    = not enableSmiFilter or (smi <= smiEma)
+            timeOk   = c.persist >= reqN
+            cValid   = not na(c.cBar) and c.cBar > c.bBar and c.cBar < bar_index
+            aValid   = not na(c.aBar)
+            distAOk  = not enableADist or (aValid and (c.aVal - c.bVal) >= aDistMult * atrVal)
+            structOk = not enableStructFilter or (aValid and cValid and c.cVal < c.aVal)
+            cFrOk    = not cValid or cBearFractalOk(c.cBar)
+            fiboOk   = true
+            retr     = float(na)
+            if enableFiboBC and aValid and cValid
+                legAB = c.aVal - c.bVal
+                retr := legAB > 0 ? (c.cVal - c.bVal) / legAB : 0.0
+                fiboOk := retr >= bcFiboMin and retr <= bcFiboMax
+            confirmed = barstate.isconfirmed and timeOk and smiOk and structOk and distAOk and cFrOk and fiboOk
+            if confirmed
+                isDup = noDuplicate and not na(lastConfirmedBearB) and c.bBar == lastConfirmedBearB
+                if isDup
+                    if not na(c.bLine)
+                        line.delete(c.bLine)
+                    array.remove(bearCands, i)
+                    continue
+                lastConfirmedBearB := c.bBar
+                if not na(c.bLine)
+                    line.set_x2(c.bLine, bar_index)
+                    line.set_color(c.bLine, bLineCol)
+                if showBreakLine and bearWaveVisible
+                    newLnB = line.new(c.bBar, c.bVal, bar_index, low, xloc=xloc.bar_index, color=finalBearCol, width=breakLineWidth)
+                    f_pushLineFade(bearBreakLineArr, bearBreakLnBarArr, bearBreakLnTimeArr, newLnB)
+                if showBreakLabel and bearWaveVisible
+                    fiboInfoB = enableFiboBC and not na(retr) ? " C:" + str.tostring(math.round(retr * 100, 1)) + "%" : ""
+                    breakTxtB = showFilterTag ? "BREAK" + fiboInfoB + "\n" + filterTagFinal : "BREAK" + fiboInfoB
+                    newLbB = label.new(bar_index, low, text=breakTxtB, color=color.new(color.black, 100), textcolor=finalBearCol, style=label.style_label_up, size=size.normal)
+                    f_pushLabelFade(bearBreakLblArr, bearBreakLbBarArr, bearBreakLbTimeArr, newLbB)
+                array.remove(bearCands, i)
+                continue
+
+        if not na(c.bLine)
+            line.set_color(c.bLine, bearWaveVisible ? bLineColTracking : color.new(bLineCol, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// FADE LOOKBACK VISUAL (barstate.islast)
+// ═══════════════════════════════════════════════════════════════
+if barstate.islast
+    f_fadeLines(bullBreakLineArr, bullBreakLnBarArr, bullBreakLnTimeArr, finalBullCol)
+    f_fadeLabels(bullBreakLblArr, bullBreakLbBarArr, bullBreakLbTimeArr, finalBullCol)
+    f_fadeLines(bearBreakLineArr, bearBreakLnBarArr, bearBreakLnTimeArr, finalBearCol)
+    f_fadeLabels(bearBreakLblArr, bearBreakLbBarArr, bearBreakLbTimeArr, finalBearCol)

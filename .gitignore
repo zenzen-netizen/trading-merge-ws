@@ -1,0 +1,15 @@
+.venv_chart/
+**/node_modules/
+**/.git/
+*.env
+.env*
+*.pem
+*.key
+id_rsa*
+*.keystore
+wallet*
+*secret*
+*credential*
+.npmrc
+.git-credentials
+**/*_2019now.csv

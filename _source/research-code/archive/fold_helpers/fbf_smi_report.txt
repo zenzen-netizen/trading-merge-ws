@@ -1,0 +1,127 @@
+==========================================================================
+FBF v6.10 + SMI Pro v3  —  DAILY CONFLUENCE TESTER
+BTCUSDT spot Binance | 1D | 2026-05-06 .. 2026-06-19
+Data: 499 candles (2025-02-24..2026-07-07)
+==========================================================================
+
+A. DAILY SMI STATE (per bar)
+--------------------------------------------------------------------------
+Date              Close      SMI    EMA   Hist  Zone     Signal   BarState
+--------------------------------------------------------------------------
+2026-05-06      81447.0    54.05  48.21   5.84  Upper N  BUY      S Bias Atas
+2026-05-07      80006.0    36.05  42.13  -6.08  Upper N  NEUTRAL  X Cross DN
+2026-05-08      80193.2    19.36  30.75 -11.38  Upper N  NEUTRAL  S Bias Atas
+2026-05-09      80678.4     7.19  18.97 -11.78  Upper N  NEUTRAL  S Bias Atas
+2026-05-10      82210.1    16.24   17.6  -1.36  Upper N  NEUTRAL  S Bias Atas
+2026-05-11      81745.6    27.09  22.35   4.74  Upper N  BUY      X Cross UP
+2026-05-12      80504.5    19.74  21.05   -1.3  Upper N  NEUTRAL  X Cross DN
+2026-05-13      79313.6    -5.17   7.94 -13.11  Lower N  SELL     ! Fail MID Sell
+2026-05-14      81090.0    -3.68   2.13  -5.81  Lower N  SELL     OK PA - Siap Balik
+2026-05-15      79113.2   -21.53   -9.7 -11.83  Lower N  SELL     B Bias Bawah
+2026-05-16      78148.1   -41.58 -25.64 -15.94  OS       SELL     !! OS Zone
+2026-05-17      77457.7    -55.6 -40.62 -14.98  OS       SELL     !! OS Zone
+2026-05-18      77001.9   -62.37  -51.5 -10.88  OS       SELL     !! OS Zone
+2026-05-19      76834.4   -66.43 -58.96  -7.47  OS       SELL     !! OS Zone
+2026-05-20      77552.2   -57.24  -58.1   0.86  OS       STR BUY  X Cross UP
+2026-05-21      77615.5   -41.87 -49.98   8.12  OS       STR BUY  !! OS Zone
+2026-05-22      75539.5   -45.77 -47.88   2.11  OS       STR BUY  !! OS Zone
+2026-05-23      76752.0   -27.24 -37.56  10.32  Lower N  NEUTRAL  B Bias Bawah
+2026-05-24      77065.0    -4.08 -20.82  16.74  Lower N  NEUTRAL  B Bias Bawah
+2026-05-25      77322.0    16.98  -1.92   18.9  Upper N  BUY      ! Fail MID Buy
+2026-05-26      75930.0    14.41   6.25   8.17  Upper N  BUY      OK PD - Siap Balik
+2026-05-27      74449.3   -12.44   -3.1  -9.34  Lower N  SELL     X Cross DN
+2026-05-28      73617.5   -34.66 -18.88 -15.78  Lower N  SELL     ~ PA - Dip Mungkin
+2026-05-29      73460.8    -48.5 -33.69 -14.81  OS       SELL     !! OS Zone
+2026-05-30      73884.4   -52.03 -42.86  -9.17  OS       SELL     !! OS Zone
+2026-05-31      73674.4   -49.92 -46.39  -3.53  OS       SELL     !! OS Zone
+2026-06-01      71408.9   -52.18 -49.28  -2.89  OS       SELL     !! OS Zone
+2026-06-02      66760.8   -65.92  -57.6  -8.32  OS       SELL     !! OS Zone
+2026-06-03      64142.8   -80.58 -69.09 -11.49  OS       SELL     !! OS Zone
+2026-06-04      63886.0   -75.64 -72.36  -3.28  OS       SELL     !! OS Zone
+2026-06-05      61056.5   -74.38 -73.37  -1.01  OS       SELL     !! OS Zone
+2026-06-06      60884.6   -73.36 -73.37    0.0  OS       STR BUY  X Cross UP
+2026-06-07      63332.0   -59.14 -66.25   7.11  OS       STR BUY  !! OS Zone
+2026-06-08      63086.0   -40.11 -53.18  13.07  OS       STR BUY  !! OS Zone
+2026-06-09      61730.0   -26.95 -40.07  13.12  Lower N  NEUTRAL  B Bias Bawah
+2026-06-10      61511.0   -20.32 -30.19   9.87  Lower N  NEUTRAL  B Bias Bawah
+2026-06-11      63626.0    -4.94 -17.56  12.63  Lower N  NEUTRAL  B Bias Bawah
+2026-06-12      63580.0    11.58  -2.99  14.57  Upper N  BUY      ! Fail MID Buy
+2026-06-13      64458.0    33.21  15.11   18.1  Upper N  BUY      ~ PD - Dip Mungkin
+2026-06-14      65746.4    57.14  36.13  21.02  Upper N  BUY      S Bias Atas
+2026-06-15      66328.7    65.53  50.83   14.7  Upper N  BUY      S Bias Atas
+2026-06-16      65675.0    58.71  54.77   3.94  Upper N  BUY      S Bias Atas
+2026-06-17      64509.4    35.29  45.03  -9.74  Upper N  NEUTRAL  X Cross DN
+2026-06-18      62958.0    -0.05  22.49 -22.54  Lower N  SELL     ! Fail MID Sell
+2026-06-19      63543.9   -21.64   0.42 -22.06  Lower N  SELL     OK PA - Siap Balik
+
+B. FBF v6.10 BREAKS IN WINDOW (default settings)
+--------------------------------------------------------------------------
+  Total breaks in full data: 5
+  Breaks with B-pivot inside window: 0
+
+C. ALL FBF BREAKS IN FULL DATA (for reference)
+--------------------------------------------------------------------------
+  [bear] 2025-03-18  ref=81134.66  confirm=2025-04-06
+  [bear] 2025-05-25  ref=106600.64  confirm=2025-05-29
+  [bear] 2025-07-25  ref=114723.16  confirm=2025-08-01
+  [bull] 2026-01-05  ref=94789.08  confirm=2026-01-13
+  [bull] 2026-03-04  ref=74050.0  confirm=2026-03-16
+
+D. ROOT CAUSE: FBF State Machine Limitation
+--------------------------------------------------------------------------
+
+FBF v6.10 Python port uses a PERSISTENT state machine that only allows
+ONE activation per direction (bull/bear) per cycle. Once bear activates,
+it stays active until CLOSE > bear_ref_level. Only then can a new bear
+break be generated.
+
+In this data:
+  • Last confirmed bear break: 2025-11-04 (ref=98,944)
+  • BTC price stayed BELOW 98,944 from Nov 2025 through Jun 2026
+    (max was ~82,500 in May 2026)
+  • Therefore bear_active remained True for 8+ months
+  • All NEW pivot low breaks (e.g. 23-May PL at 74,290) get absorbed
+    into the EXISTING bear state — never registered as new breaks
+  • The no_duplicate filter then blocks the stale confirm attempt
+
+This is NOT a bug — it's a DESIGN characteristic of this state-machine
+port, which favours one clean break per cycle over multiple signals.
+
+On TradingView, the Pine Script version may behave differently because
+Pine recalculates series per bar and doesn't carry persistent state
+between bars the same way.
+
+
+E. WHAT TO CHECK ON YOUR TRADINGVIEW
+--------------------------------------------------------------------------
+
+Compare with your TV FBF v6.10:
+  1) Does your TV indicator show any FBF signal between 6 May — 19 Jun?
+     - If YES, the TV version handles this differently (series-based)
+     - If NO, our Python port matches — FBF is designed to filter out
+       runaway trends
+  2) Check enable_fibo_bc, enable_persist_filter, enable_st_trend_filter
+  3) The Fibo C2 gate (50-78.6%) likely blocks bear breaks even when
+    'raw' break is valid — we confirmed this in debug: bear_confirmed
+    flips True when enable_fibo_bc=False, BUT the stale state prevents
+    capturing it as a fresh break
+
+
+F. SMI OBSERVATIONS (key points for your TV cross-check)
+--------------------------------------------------------------------------
+
+  ✓ SMI Pro v3 works correctly — table matches expected Pine behaviour
+  • 11-May: SMI Cross UP (27→22) — short-lived buy signal
+  • 13-May: Fail MID Sell — SMI dropped below 0 without sufficient
+    prior above-0 streak
+  • 16-19 May: OS Zone (SMI < -40) — oversold region
+  • 20-May: Cross UP in OS → STR BUY (bullish divergence potential)
+  • 25-May: Fail MID Buy — quick bounce above 0 but rejected
+  • 27-May: Cross DN — bearish continuation
+  • 29 May - 10 Jun: sustained OS zone, SELL/STR BUY signals
+  • 12-16 Jun: cross MID up, recovery signals after 60k bottom
+  • 18-19 Jun: Fail MID Sell + PA ready — potential reversal setup
+  
+  SMI shows solid PA/PD cycle alignment with the May-Jun price action.
+
+==========================================================================

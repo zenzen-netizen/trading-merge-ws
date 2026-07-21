@@ -1,0 +1,170 @@
+//@version=6
+indicator("RSI Pro Enhanced", "RSI_Pro", format=format.price, precision=2)
+
+// RSI SETTINGS
+rsiLen = input.int(5, "RSI Length", minval=1, group="RSI")
+rsiSrc = input.source(close, "Source", group="RSI")
+rsiOB = input.int(80, "RSI OB", group="RSI")
+rsiMID = input.int(40, "RSI MID", group="RSI")
+rsiOS = input.int(30, "RSI OS", group="RSI")
+sMk = input.bool(true, "Markers?", group="RSI")
+
+// SMOOTHING MA
+maType = input.string("EMA", "MA Type", options=["None","SMA","EMA","SMMA (RMA)","WMA","VWMA","SMA + BB"], group="Smoothing MA")
+maLen = input.int(14, "MA Length", minval=1, group="Smoothing MA")
+bbMult = input.float(2.0, "BB StdDev", minval=0.001, maxval=50, step=0.5, group="Smoothing MA")
+
+// DIVERGENCE
+calcDiv = input.bool(true, "Calculate Divergence?", group="Divergence")
+lbR = input.int(5, "Pivot Lookback Right", minval=1, group="Divergence")
+lbL = input.int(5, "Pivot Lookback Left", minval=1, group="Divergence")
+rngU = input.int(60, "Range Upper", minval=1, group="Divergence")
+rngL = input.int(5, "Range Lower", minval=1, group="Divergence")
+
+// RIBBON
+showRibbon = input.bool(true, "Show Ribbon?", group="Ribbon")
+rHeight = input.float(8, "Box Height", minval=1, maxval=20, step=0.5, group="Ribbon")
+rGap = input.float(1.5, "Gap", minval=0, maxval=5, step=0.5, group="Ribbon")
+extLvl = input.int(90, "Extreme Level", minval=75, maxval=95, group="Ribbon")
+extLow = input.int(10, "Extreme Low", minval=5, maxval=25, group="Ribbon")
+rTrans = input.int(30, "Transparency", minval=0, maxval=95, group="Ribbon")
+rWk = input.color(color.orange, "Sell L1", group="Ribbon")
+rMd = input.color(color.red, "Sell L2", group="Ribbon")
+rSt = input.color(#8b0000, "Sell L3", group="Ribbon")
+bWk = input.color(color.aqua, "Buy L1", group="Ribbon")
+bMd = input.color(color.green, "Buy L2", group="Ribbon")
+bSt = input.color(color.lime, "Buy L3", group="Ribbon")
+
+// COLORS
+rsiBull = input.color(color.lime, "RSI Bull", group="Colors")
+rsiBear = input.color(color.red, "RSI Bear", group="Colors")
+rsiDef = input.color(#7E57C2, "RSI Default", group="Colors")
+maLineCol = input.color(color.yellow, "MA Signal", group="Colors")
+obCol = input.color(color.red, "OB Line", group="Colors")
+midCol = input.color(color.yellow, "MID Line", group="Colors")
+osCol = input.color(color.green, "OS Line", group="Colors")
+
+// HIST
+showHist = input.bool(false, "Show Histogram?", group="Hist")
+hAU = input.color(color.aqua, "Hist AU", group="Hist")
+hAD = input.color(color.blue, "Hist AD", group="Hist")
+hBD = input.color(color.red, "Hist BD", group="Hist")
+hBU = input.color(#6A0DAD, "Hist BU", group="Hist")
+
+// PA/PD
+showLbl = input.bool(true, "Show PA/PD Lines?", group="Labels")
+akumCandles = input.int(2, "Pre-Akum Candles", minval=1, maxval=20, group="Labels")
+distCandles = input.int(2, "Pre-Dist Candles", minval=1, maxval=20, group="Labels")
+akumLineCol = input.color(color.new(color.green, 40), "PA Line", group="Labels")
+akumTxtCol = input.color(color.lime, "PA Text", group="Labels")
+distLineCol = input.color(color.new(color.orange, 40), "PD Line", group="Labels")
+distTxtCol = input.color(color.orange, "PD Text", group="Labels")
+lineWidth = input.int(1, "Line Width", minval=1, maxval=3, group="Labels")
+
+// DASHBOARD
+showDash = input.bool(true, "Show Dashboard?", group="Dashboard")
+dashPos = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right","Middle Left"], group="Dashboard")
+dashSize = input.string("Small", "Size", options=["Tiny","Small","Normal","Large"], group="Dashboard")
+dashBg = input.color(color.new(#1e222d, 10), "BG Color", group="Dashboard")
+
+// RSI CALC
+change = ta.change(rsiSrc)
+up = ta.rma(math.max(change, 0), rsiLen)
+down = ta.rma(-math.min(change, 0), rsiLen)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+// MA CALC
+ma(src, len, typ) =>
+    switch typ
+        "SMA" => ta.sma(src, len)
+        "SMA + BB" => ta.sma(src, len)
+        "EMA" => ta.ema(src, len)
+        "SMMA (RMA)" => ta.rma(src, len)
+        "WMA" => ta.wma(src, len)
+        "VWMA" => ta.vwma(src, len)
+
+isBB = maType == "SMA + BB"
+enableMA = maType != "None"
+rsiMA = enableMA ? ma(rsi, maLen, maType) : na
+rsiStdDev = isBB ? ta.stdev(rsi, maLen) * bbMult : na
+
+rsiH = enableMA ? rsi - rsiMA : 0
+sAb = enableMA ? rsi >= rsiMA : true
+sHAU = rsiH > rsiH[1] and rsiH > 0
+sHAD = rsiH < rsiH[1] and rsiH > 0
+sHBD = rsiH < rsiH[1] and rsiH <= 0
+sHBU = rsiH > rsiH[1] and rsiH <= 0
+
+rsiLC = enableMA ? (sAb ? rsiBull : rsiBear) : rsiDef
+sHC = sHAU ? hAU : sHAD ? hAD : sHBD ? hBD : sHBU ? hBU : color.gray
+
+sCr = enableMA ? ta.cross(rsi, rsiMA) : false
+
+// PA/PD COUNTER
+var int bCnt = 0
+var int aCnt = 0
+
+if rsi < rsiMID
+    bCnt := bCnt + 1
+    aCnt := 0
+else if rsi > rsiMID
+    aCnt := aCnt + 1
+    bCnt := 0
+else
+    bCnt := 0
+    aCnt := 0
+
+preAkum = bCnt == akumCandles
+preDist = aCnt == distCandles
+
+// CROSS TRACKING
+var int sLB = 0
+if sCr
+    sLB := bar_index
+sBA = bar_index - sLB
+
+// ZONE & SIGNAL
+sZone = rsi > rsiOB ? "OB" : rsi > rsiMID ? "Upper N" : rsi > 50 ? "Middle" : rsi > rsiOS ? "Lower N" : "OS"
+sZoneC = rsi > rsiOB ? color.red : rsi > rsiMID ? color.orange : rsi > 50 ? color.yellow : rsi > rsiOS ? color.aqua : color.lime
+
+sHSt = sHAU ? "Exp Bull" : sHAD ? "Shr Bull" : sHBD ? "Exp Bear" : sHBU ? "Shr Bear" : "Neutral"
+sHStC = sHAU ? color.lime : sHAD ? color.orange : sHBD ? color.red : sHBU ? color.maroon : color.gray
+
+sSig = rsi > rsiOB and not sAb ? "STR SELL" : rsi < rsiOS and sAb ? "STR BUY" : sAb and rsi > 50 ? "BUY" : not sAb and rsi < 50 ? "SELL" : "NEUTRAL"
+sSigC = sSig == "STR BUY" ? color.lime : sSig == "BUY" ? color.green : sSig == "STR SELL" ? color.red : sSig == "SELL" ? color.maroon : color.gray
+
+sStrVal = sSig == "STR BUY" or sSig == "STR SELL" ? 90 : sSig == "BUY" or sSig == "SELL" ? 70 : 30
+sStrHashes = math.floor(sStrVal / 10)
+sStrBar = str.repeat("#", sStrHashes) + str.repeat("-", 10 - sStrHashes)
+
+paPdTxt = preAkum ? "PA ON" : preDist ? "PD ON" : bCnt > 0 ? "PA " + str.tostring(bCnt) + "/" + str.tostring(akumCandles) : aCnt > 0 ? "PD " + str.tostring(aCnt) + "/" + str.tostring(distCandles) : "-"
+paPdC = preAkum ? color.lime : preDist ? color.orange : bCnt > 0 ? color.aqua : aCnt > 0 ? color.yellow : color.gray
+
+// DIVERGENCE
+plFound = calcDiv ? not na(ta.pivotlow(rsi, lbL, lbR)) : false
+phFound = calcDiv ? not na(ta.pivothigh(rsi, lbL, lbR)) : false
+
+plBars = ta.barssince(plFound[1])
+phBars = ta.barssince(phFound[1])
+plInRange = plBars >= rngL and plBars <= rngU
+phInRange = phBars >= rngL and phBars <= rngU
+
+rsiLBR = rsi[lbR]
+lowLBR = low[lbR]
+highLBR = high[lbR]
+
+rsiPrevLow = ta.valuewhen(plFound, rsiLBR, 1)
+rsiPrevHigh = ta.valuewhen(phFound, rsiLBR, 1)
+lowPrevLow = ta.valuewhen(plFound, lowLBR, 1)
+highPrevHigh = ta.valuewhen(phFound, highLBR, 1)
+
+rsiHL = rsiLBR > rsiPrevLow and plInRange
+rsiLH = rsiLBR < rsiPrevHigh and phInRange
+priceLL = lowLBR < lowPrevLow
+priceHH = highLBR > highPrevHigh
+
+bullCond = calcDiv and priceLL and rsiHL and plFound
+bearCond = calcDiv and priceHH and rsiLH and phFound
+
+divText = bullCond ? "Bull Div" : bearCond ? "Bear Div" : "None"
+divC = bullCond ? color.lime : bearCond ? color.red : color.gray

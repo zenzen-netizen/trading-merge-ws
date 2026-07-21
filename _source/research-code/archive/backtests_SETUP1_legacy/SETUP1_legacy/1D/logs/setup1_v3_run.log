@@ -1,0 +1,180 @@
+[fetch] BTCUSDT daily 2023..now
+[fetch] 2747 candles  2019-01-01 .. 2026-07-09
+[AB] events: 210
+[ST] building supertrend trend array...
+[ST] done. downtrend bars: 1297/2747
+[RAWBRK] building bear active series...
+[RAWBRK] bear active at last bar: True, total bars break-active: 1519
+[SETUP1] raw signals: 150 | ST-gated (C+entry downtrend): 67
+[JOURNAL] wrote 6510 trades -> setup1_v3_journal.csv
+
+========================================================================
+
+========================================================================
+SETUP 1 SHORT — BACKTEST v2  [RAW (no ST filter)]
+BTCUSDT 1D | 2747 candles | 150 signals
+========================================================================
+
+━━━ O1 Liq10x ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x        150   62   86    0    0    0    0    2  41.9%  -24.0R -0.160   15d
+2x        150   39  108    0    0    0    0    3  26.5%  -30.0R -0.200   23d
+3x        150   23  122    0    0    0    0    5  15.9%  -53.0R -0.353   36d
+TRAIL     150    0   35  113    0    0    0    2  76.4%  -24.0R -0.160    5d
+ST_REV    150    0   71    0   74    0    0    5  51.0%  -12.9R -0.086   26d
+RAWBRK    150    0  112    0    0    4   27    7  21.7% -103.8R -0.692   50d
+
+━━━ O2 C+ATR14 ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x        139   69   68    0    0    0    0    2  50.4%   +1.0R +0.007   18d
+2x        139   42   94    0    0    0    0    3  30.9%  -10.0R -0.072   34d
+3x        139   24  111    0    0    0    0    4  17.8%  -39.0R -0.281   53d
+TRAIL     139    0   28  109    0    0    0    2  79.6%  -15.1R -0.108    6d
+ST_REV    139    0   61    0   73    0    0    5  54.5%   +9.5R +0.068   28d
+RAWBRK    139    0  103    0    0    4   27    5  23.1%  -91.8R -0.660   68d
+
+━━━ O3 ATR%30 ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x        150   72   76    0    0    0    0    2  48.6%   -4.0R -0.027    4d
+2x        150   39  109    0    0    0    0    2  26.4%  -31.0R -0.207    8d
+3x        150   30  117    0    0    0    0    3  20.4%  -27.0R -0.180    9d
+TRAIL     150    0   48  100    0    0    0    2  67.6%  -21.7R -0.145    3d
+ST_REV    150    0  118    0   28    0    0    4  19.2%  -20.2R -0.135   16d
+RAWBRK    150    0  131    0    0    0   15    4  10.3% -111.4R -0.742   38d
+
+━━━ O4 Fix6% ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x        150   69   79    0    0    0    0    2  46.6%  -10.0R -0.067    7d
+2x        150   40  107    0    0    0    0    3  27.2%  -27.0R -0.180   12d
+3x        150   28  119    0    0    0    0    3  19.0%  -35.0R -0.233   15d
+TRAIL     150    0   44  104    0    0    0    2  70.3%  -25.7R -0.171    4d
+ST_REV    150    0  100    0   45    0    0    5  31.0%  -19.4R -0.129   20d
+RAWBRK    150    0  120    0    0    2   23    5  17.2% -107.7R -0.718   41d
+
+━━━ O5 ConfHi+ATR ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x        150   63   85    0    0    0    0    2  42.6%  -22.0R -0.147   11d
+2x        150   35  112    0    0    0    0    3  23.8%  -42.0R -0.280   17d
+3x        150   27  120    0    0    0    0    3  18.4%  -39.0R -0.260   27d
+TRAIL     150    0   35  113    0    0    0    2  76.4%  -21.4R -0.142    4d
+ST_REV    150    0   98    0   47    0    0    5  32.4%  -16.4R -0.109   23d
+RAWBRK    150    0  117    0    0    4   24    5  19.3% -103.9R -0.693   53d
+
+═══ BEST [RAW (no ST filter)]: O2 C+ATR14 × ST_REV ═══
+  Net R: +9.5R
+
+========================================================================
+SETUP 1 SHORT — BACKTEST v2  [GATED (ST downtrend @ C + entry)]
+BTCUSDT 1D | 2747 candles | 67 signals
+========================================================================
+
+━━━ O1 Liq10x ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x         67   32   33    0    0    0    0    2  49.2%   -1.0R -0.015   12d
+2x         67   17   47    0    0    0    0    3  26.6%  -13.0R -0.194   17d
+3x         67   13   50    0    0    0    0    4  20.6%  -11.0R -0.164   25d
+TRAIL      67    0   15   50    0    0    0    2  76.9%   -9.9R -0.148    5d
+ST_REV     67    0   25    0   38    0    0    4  60.3%   +5.3R +0.079   24d
+RAWBRK     67    0   54    0    0    0    7    6  11.5%  -51.8R -0.773   78d
+
+━━━ O2 C+ATR14 ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x         67   30   35    0    0    0    0    2  46.2%   -5.0R -0.075   15d
+2x         67   19   45    0    0    0    0    3  29.7%   -7.0R -0.104   23d
+3x         67   12   51    0    0    0    0    4  19.0%  -15.0R -0.224   38d
+TRAIL      67    0   13   52    0    0    0    2  80.0%   -8.2R -0.122    5d
+ST_REV     67    0   25    0   38    0    0    4  60.3%  +10.6R +0.158   28d
+RAWBRK     67    0   55    0    0    1    7    4  12.7%  -52.9R -0.790  100d
+
+━━━ O3 ATR%30 ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x         67   34   31    0    0    0    0    2  52.3%   +3.0R +0.045    5d
+2x         67   23   42    0    0    0    0    2  35.4%   +4.0R +0.060    7d
+3x         67   17   47    0    0    0    0    3  26.6%   +4.0R +0.060    9d
+TRAIL      67    0   19   46    0    0    0    2  70.8%   -9.2R -0.137    4d
+ST_REV     67    0   48    0   15    0    0    4  23.8%  +10.5R +0.157   18d
+RAWBRK     67    0   59    0    0    0    4    4   6.3%  -51.7R -0.771   69d
+
+━━━ O4 Fix6% ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x         67   34   31    0    0    0    0    2  52.3%   +3.0R +0.045    5d
+2x         67   20   44    0    0    0    0    3  31.2%   -4.0R -0.060    9d
+3x         67   15   49    0    0    0    0    3  23.4%   -4.0R -0.060   11d
+TRAIL      67    0   20   45    0    0    0    2  69.2%  -11.9R -0.178    3d
+ST_REV     67    0   44    0   19    0    0    4  30.2%   +4.9R +0.073   20d
+RAWBRK     67    0   57    0    0    0    6    4   9.5%  -52.5R -0.784   71d
+
+━━━ O5 ConfHi+ATR ━━━
+TP_Ratio   Tr   TP   SL   TR  SRV  RBK  RTL  EXP    WR%    TotR    AvgR  AvgD
+--------------------------------------------------------------------------------
+1x         67   31   34    0    0    0    0    2  47.7%   -3.0R -0.045   12d
+2x         67   19   45    0    0    0    0    3  29.7%   -7.0R -0.104   17d
+3x         67   16   48    0    0    0    0    3  25.0%   +0.0R +0.000   29d
+TRAIL      67    0   13   52    0    0    0    2  80.0%   -6.9R -0.103    5d
+ST_REV     67    0   37    0   26    0    0    4  41.3%  +12.6R +0.188   27d
+RAWBRK     67    0   56    0    0    1    6    4  11.1%  -52.6R -0.784   97d
+
+═══ BEST [GATED (ST downtrend @ C + entry)]: O5 ConfHi+ATR × ST_REV ═══
+  Net R: +12.6R
+
+========================================================================
+COMPARISON: RAW vs GATED (best TP per option)
+Option       RAW_TotR   GATED_TotR       ΔR
+--------------------------------------------
+O1             -24.0R        -1.0R   +23.0
+O2              +1.0R        -5.0R    -6.0
+O3              -4.0R        +4.0R    +8.0
+O4             -10.0R        +3.0R   +13.0
+O5             -21.4R        +0.0R   +21.4
+========================================================================
+
+▸ TRAILING STOP (both modes)
+  Activation: price drops by half atr_pct% from entry
+  Trail gap: 1× ATR% from lowest_reached
+  SL still active during trailing
+========================================================================
+
+━━━ CANONICAL 2026 (RAW) ━━━
+  Entry 2026-06-17 @ 64509  C_high=67292  APCT=3.6%
+  ST@C=DOWN  ST@Entry=DOWN  → ST_OK=True
+    Liq10x×1x    →    TP in  14d  R=+1.00
+    Liq10x×2x    →   EXP in  22d  R=+0.43
+    Liq10x×3x    →   EXP in  22d  R=+0.43
+    Liq10x×TRAIL → TRAIL in   1d  R=+0.00
+    Liq10x×ST_REV →   EXP in  22d  R=+0.43
+    Liq10x×RAWBRK →   EXP in  22d  R=+0.43
+   C+ATR14×1x    →    TP in   8d  R=+1.00
+   C+ATR14×2x    →   EXP in  22d  R=+0.51
+   C+ATR14×3x    →   EXP in  22d  R=+0.51
+   C+ATR14×TRAIL → TRAIL in   1d  R=+0.00
+   C+ATR14×ST_REV →   EXP in  22d  R=+0.51
+   C+ATR14×RAWBRK →   EXP in  22d  R=+0.51
+    ATR%30×1x    →    TP in   6d  R=+1.00
+    ATR%30×2x    →    TP in   7d  R=+2.00
+    ATR%30×3x    →   EXP in  22d  R=+1.22
+    ATR%30×TRAIL → TRAIL in   1d  R=+0.01
+    ATR%30×ST_REV →   EXP in  22d  R=+1.22
+    ATR%30×RAWBRK →   EXP in  22d  R=+1.22
+     Fix6%×1x    →    TP in   7d  R=+1.00
+     Fix6%×2x    →   EXP in  22d  R=+0.72
+     Fix6%×3x    →   EXP in  22d  R=+0.72
+     Fix6%×TRAIL → TRAIL in   1d  R=+0.00
+     Fix6%×ST_REV →   EXP in  22d  R=+0.72
+     Fix6%×RAWBRK →   EXP in  22d  R=+0.72
+  ConfHi+ATR×1x    →    TP in   7d  R=+1.00
+  ConfHi+ATR×2x    →   EXP in  22d  R=+0.61
+  ConfHi+ATR×3x    →   EXP in  22d  R=+0.61
+  ConfHi+ATR×TRAIL → TRAIL in   1d  R=+0.00
+  ConfHi+ATR×ST_REV →   EXP in  22d  R=+0.61
+  ConfHi+ATR×RAWBRK →   EXP in  22d  R=+0.61
+
+========================================================================

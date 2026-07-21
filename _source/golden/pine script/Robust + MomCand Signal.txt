@@ -1,0 +1,506 @@
+//@version=6
+indicator("Robust + MomCand Signal", overlay=true, max_lines_count=200, max_labels_count=200)
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. ROBUST LINES — Current TF
+// ═══════════════════════════════════════════════════════════════════
+grp_rob = "1. Robust Lines (Current TF)"
+
+rob_show_fast = input.bool(true,  "Show FAST", inline="rsh", group=grp_rob)
+rob_show_main = input.bool(true,  "Show MAIN", inline="rsh", group=grp_rob)
+rob_show_slow = input.bool(true,  "Show SLOW", inline="rsh", group=grp_rob)
+
+rob_col_fast  = input.color(color.new(color.aqua,   0), "FAST Color", inline="rcol", group=grp_rob)
+rob_col_main  = input.color(color.new(color.white,  0), "MAIN Color", inline="rcol", group=grp_rob)
+rob_col_slow  = input.color(color.new(color.orange, 0), "SLOW Color", inline="rcol", group=grp_rob)
+
+rob_align_mode = input.string("AND (semua harus align)", "Align Mode",
+     options=["AND (semua harus align)", "OR (salah satu cukup)", "Priority FAST", "Priority MAIN", "Priority SLOW"],
+     group=grp_rob)
+rob_stack_on    = input.bool(true, "Require FAST > MAIN > SLOW stack", group=grp_rob)
+rob_stack_eq_ok = input.bool(false, "Allow Equal in stack (>= / <=)", group=grp_rob)
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. ROBUST LINES — HTF
+// ═══════════════════════════════════════════════════════════════════
+grp_htf = "2. Robust Lines (HTF)"
+
+htf_on  = input.bool(true, "Enable HTF Robust", group=grp_htf)
+htf_tf  = input.timeframe("D", "HTF Timeframe", group=grp_htf)
+
+htf_show_fast = input.bool(true,  "Show HTF FAST", inline="htfsh", group=grp_htf)
+htf_show_main = input.bool(false, "Show HTF MAIN", inline="htfsh", group=grp_htf)
+htf_show_slow = input.bool(false, "Show HTF SLOW", inline="htfsh", group=grp_htf)
+
+htf_col_fast  = input.color(color.new(color.aqua,   0), "HTF FAST Color", inline="htfcol", group=grp_htf)
+htf_col_main  = input.color(color.new(color.white,  0), "HTF MAIN Color", inline="htfcol", group=grp_htf)
+htf_col_slow  = input.color(color.new(color.orange, 0), "HTF SLOW Color", inline="htfcol", group=grp_htf)
+
+htf_cross_on    = input.bool(true, "Show HTF Cross Labels", inline="htfmk", group=grp_htf)
+htf_col_xup     = input.color(color.new(color.lime, 0), "Cross UP Color",   inline="htfmk", group=grp_htf)
+htf_col_xdn     = input.color(color.new(color.red,  0), "Cross DOWN Color", inline="htfmk", group=grp_htf)
+htf_cross_which = input.string("FAST", "Cross on which line", options=["FAST","MAIN","SLOW","Any"], group=grp_htf)
+htf_max_labels  = input.int(30, "Max HTF Cross Label History", minval=0, maxval=200, group=grp_htf)
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. MOMENTUM CANDLE
+// ═══════════════════════════════════════════════════════════════════
+grp_mom = "3. Momentum Candle"
+
+mom_mode = input.string("Smart Stats", "Mode",
+     options=["Fixed Pips", "Dynamic ATR", "Smart Stats", "CRT (2-Candle)"],
+     group=grp_mom)
+
+fp_min_pips = input.float(20.0, "Fixed: Min Pips", minval=0.1, step=0.5, group=grp_mom)
+fp_pip_size = input.float(0.0001, "Fixed: Pip Size", step=0.0001, group=grp_mom)
+
+atr_len    = input.int(14, "ATR: Length", minval=1, group=grp_mom)
+atr_mult   = input.float(1.5, "ATR: Multiplier", step=0.1, group=grp_mom)
+atr_smooth = input.string("RMA", "ATR: Smoothing", options=["RMA","EMA","SMA","WMA"], group=grp_mom)
+
+qt_look    = input.int(200, "Smart: Lookback", minval=10, group=grp_mom)
+qt_dev     = input.float(2.0, "Smart: MAD Multiplier", step=0.1, group=grp_mom)
+qt_max_wick = input.float(0.30, "Smart: Max Wick Ratio", minval=0.0, maxval=1.0, step=0.01, group=grp_mom)
+
+crt_c1_body_pct  = input.float(60.0, "CRT: Min Body % C1 (Range)",  minval=0.0, maxval=100.0, step=1.0, group=grp_mom)
+crt_c2_body_pct  = input.float(60.0, "CRT: Min Body % C2 (Signal)", minval=0.0, maxval=100.0, step=1.0, group=grp_mom)
+crt_c2_max_ratio = input.float(0.5, "CRT: Max Body C2 vs C1 ratio", minval=0.0, step=0.01, group=grp_mom)
+crt_close_inside = input.bool(true, "CRT: C2 Close inside C1 range", group=grp_mom)
+crt_dir          = input.string("Both", "CRT: Direction", options=["Both","Same Direction","Opposite"], group=grp_mom)
+crt_t1_on        = input.bool(true, "CRT: T1 (Sweep)",    inline="crtt", group=grp_mom)
+crt_t2_on        = input.bool(true, "CRT: T2 (No Sweep)", inline="crtt", group=grp_mom)
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. SIGNAL & FILTER
+// ═══════════════════════════════════════════════════════════════════
+grp_sig = "4. Signal & Filter"
+
+side_mode     = input.string("Both", "Show Signals", options=["Both","Buy Only","Sell Only"], group=grp_sig)
+rob_dir_on    = input.bool(false, "Enable Robust Direction Filter", group=grp_sig)
+rob_dir_mode  = input.string("Only One Direction", "Rob Filter Mode",
+     options=["Only One Direction","Both Direction (Reverse)"], group=grp_sig)
+
+show_sig_lbl  = input.bool(true, "Show Signal Marker", group=grp_sig)
+show_crt_type = input.bool(true, "Show CRT Type (T1/T2)", group=grp_sig)
+
+// Marker style
+sig_marker_style = input.string("Segitiga", "Marker Style",
+     options=["Segitiga", "Lingkaran", "Label Teks", "Diamond", "Panah"],
+     group=grp_sig)
+
+// Custom text (hanya aktif saat Label Teks)
+sig_txt_bull  = input.string("L", "Teks Bull (Label Teks)",  inline="stxt", group=grp_sig)
+sig_txt_bear  = input.string("S", "Teks Bear (Label Teks)",  inline="stxt", group=grp_sig)
+
+// Size
+sig_marker_sz = input.string("Normal", "Ukuran Marker",
+     options=["Tiny","Small","Normal","Large","Huge"], group=grp_sig)
+
+// Colors
+sig_col_buy   = input.color(color.blue, "Warna Bull", inline="sc", group=grp_sig)
+sig_col_sell  = input.color(color.red,  "Warna Bear", inline="sc", group=grp_sig)
+sig_txt_col   = input.color(color.white, "Warna Teks", inline="sc", group=grp_sig)
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
+grp_dash = "5. Dashboard"
+
+dash_on      = input.bool(true, "Show Dashboard", group=grp_dash)
+dash_pos     = input.string("Top Right", "Posisi",
+     options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=grp_dash)
+dash_txt_sz  = input.string("Normal", "Ukuran Teks",
+     options=["Tiny","Small","Normal","Large"], group=grp_dash)
+dash_txt_col = input.color(color.white, "Warna Teks", inline="dcol", group=grp_dash)
+dash_lbl_col = input.color(color.new(color.white, 40), "Warna Label", inline="dcol", group=grp_dash)
+dash_bg_col  = input.color(color.new(color.black, 45), "Warna Background", group=grp_dash)
+dash_hdr_col = input.color(color.new(color.gray, 50),  "Warna Header", group=grp_dash)
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+f_atr(len, smooth) =>
+    float tr_ = ta.tr(true)
+    float out = switch smooth
+        "EMA" => ta.ema(tr_, len)
+        "SMA" => ta.sma(tr_, len)
+        "WMA" => ta.wma(tr_, len)
+        =>       ta.rma(tr_, len)
+    out
+
+f_mad(src, len) =>
+    float med = ta.median(src, len)
+    float dev = math.abs(src - med)
+    ta.median(dev, len)
+
+f_sz(s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        "Large"  => size.large
+        =>          size.small
+
+f_pos(s) =>
+    switch s
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        =>               position.top_right
+
+// ═══════════════════════════════════════════════════════════════════
+// ROBUST CALCULATION
+// ═══════════════════════════════════════════════════════════════════
+float MAD_MULT = 2.5
+
+f_robust(array<float> vals, array<float> wgts) =>
+    float med  = array.median(vals)
+    array<float> devs = array.new_float()
+    for i = 0 to array.size(vals) - 1
+        array.push(devs, math.abs(array.get(vals, i) - med))
+    float mad = array.median(devs)
+    float lo  = med - mad * MAD_MULT
+    float hi  = med + mad * MAD_MULT
+    float num = 0.0
+    float den = 0.0
+    for i = 0 to array.size(vals) - 1
+        float v = math.max(lo, math.min(hi, array.get(vals, i)))
+        float w = array.get(wgts, i)
+        num += v * w
+        den += w
+    den > 0 ? num / den : med
+
+float e1 = ta.ema(close, 8)
+float e2 = ta.ema(close, 13)
+float e3 = ta.ema(close, 21)
+float e4 = ta.ema(close, 34)
+float e5 = ta.ema(close, 50)
+float e6 = ta.ema(close, 100)
+float e7 = ta.ema(close, 150)
+float e8 = ta.ema(close, 200)
+
+float rob_fast = f_robust(array.from(e1,e2,e3,e4),         array.from(1.0,1.5,2.0,2.5))
+float rob_main = f_robust(array.from(e1,e2,e3,e4,e5,e6,e7,e8), array.from(1.0,1.5,2.0,2.5,3.0,4.0,4.5,5.0))
+float rob_slow = f_robust(array.from(e5,e6,e7,e8),         array.from(3.0,4.0,4.5,5.0))
+
+// ═══════════════════════════════════════════════════════════════════
+// PLOT CURRENT TF
+// ═══════════════════════════════════════════════════════════════════
+plot(rob_show_fast ? rob_fast : na, "Rob FAST", color=rob_col_fast, linewidth=1)
+plot(rob_show_main ? rob_main : na, "Rob MAIN", color=rob_col_main, linewidth=2)
+plot(rob_show_slow ? rob_slow : na, "Rob SLOW", color=rob_col_slow, linewidth=1)
+
+// ═══════════════════════════════════════════════════════════════════
+// HTF ROBUST
+// ═══════════════════════════════════════════════════════════════════
+int  sec_chart = timeframe.in_seconds(timeframe.period)
+int  sec_htf   = timeframe.in_seconds(htf_tf)
+bool is_ltf    = sec_chart < sec_htf
+
+float htf_fast = htf_on and is_ltf ? request.security(syminfo.tickerid, htf_tf, rob_fast, barmerge.gaps_off, barmerge.lookahead_off) : rob_fast
+float htf_main = htf_on and is_ltf ? request.security(syminfo.tickerid, htf_tf, rob_main, barmerge.gaps_off, barmerge.lookahead_off) : rob_main
+float htf_slow = htf_on and is_ltf ? request.security(syminfo.tickerid, htf_tf, rob_slow, barmerge.gaps_off, barmerge.lookahead_off) : rob_slow
+float htf_cls  = htf_on and is_ltf ? request.security(syminfo.tickerid, htf_tf, close,    barmerge.gaps_off, barmerge.lookahead_off) : close
+
+plot(htf_on and htf_show_fast ? htf_fast : na, "HTF Rob FAST", color=htf_col_fast, linewidth=3)
+plot(htf_on and htf_show_main ? htf_main : na, "HTF Rob MAIN", color=htf_col_main, linewidth=4)
+plot(htf_on and htf_show_slow ? htf_slow : na, "HTF Rob SLOW", color=htf_col_slow, linewidth=3)
+
+// ═══════════════════════════════════════════════════════════════════
+// HTF CROSS LABELS
+// ═══════════════════════════════════════════════════════════════════
+bool htf_new_bar  = is_ltf ? ta.change(time(htf_tf)) != 0 : false
+
+bool htf_xup_fast = ta.crossover(htf_cls,  htf_fast)
+bool htf_xdn_fast = ta.crossunder(htf_cls, htf_fast)
+bool htf_xup_main = ta.crossover(htf_cls,  htf_main)
+bool htf_xdn_main = ta.crossunder(htf_cls, htf_main)
+bool htf_xup_slow = ta.crossover(htf_cls,  htf_slow)
+bool htf_xdn_slow = ta.crossunder(htf_cls, htf_slow)
+
+f_htf_evt(evt) =>
+    is_ltf ? htf_new_bar and (evt or evt[1]) : evt
+
+bool want_fast = htf_cross_which == "FAST" or htf_cross_which == "Any"
+bool want_main = htf_cross_which == "MAIN" or htf_cross_which == "Any"
+bool want_slow = htf_cross_which == "SLOW" or htf_cross_which == "Any"
+
+bool do_xup_fast = htf_on and htf_cross_on and htf_show_fast and want_fast and f_htf_evt(htf_xup_fast)
+bool do_xdn_fast = htf_on and htf_cross_on and htf_show_fast and want_fast and f_htf_evt(htf_xdn_fast)
+bool do_xup_main = htf_on and htf_cross_on and htf_show_main and want_main and f_htf_evt(htf_xup_main)
+bool do_xdn_main = htf_on and htf_cross_on and htf_show_main and want_main and f_htf_evt(htf_xdn_main)
+bool do_xup_slow = htf_on and htf_cross_on and htf_show_slow and want_slow and f_htf_evt(htf_xup_slow)
+bool do_xdn_slow = htf_on and htf_cross_on and htf_show_slow and want_slow and f_htf_evt(htf_xdn_slow)
+
+var label[] htf_lbls = array.new_label()
+
+f_push_htf_lbl(cond, txt, col, y_pos, is_up) =>
+    if cond and barstate.isconfirmed and htf_max_labels > 0
+        label lb = label.new(bar_index, y_pos, txt,
+             color=col, textcolor=color.white, size=size.tiny)
+        if is_up
+            label.set_style(lb, label.style_label_up)
+        else
+            label.set_style(lb, label.style_label_down)
+        array.push(htf_lbls, lb)
+        if array.size(htf_lbls) > htf_max_labels
+            label.delete(array.shift(htf_lbls))
+
+f_push_htf_lbl(do_xup_fast, "HTF X UP F", htf_col_xup, low,  true)
+f_push_htf_lbl(do_xdn_fast, "HTF X DN F", htf_col_xdn, high, false)
+f_push_htf_lbl(do_xup_main, "HTF X UP M", htf_col_xup, low,  true)
+f_push_htf_lbl(do_xdn_main, "HTF X DN M", htf_col_xdn, high, false)
+f_push_htf_lbl(do_xup_slow, "HTF X UP S", htf_col_xup, low,  true)
+f_push_htf_lbl(do_xdn_slow, "HTF X DN S", htf_col_xdn, high, false)
+
+// ═══════════════════════════════════════════════════════════════════
+// ROBUST DIRECTION — Current TF
+// ═══════════════════════════════════════════════════════════════════
+bool _up_fast = close > rob_fast
+bool _up_main = close > rob_main
+bool _up_slow = close > rob_slow
+bool _dn_fast = close < rob_fast
+bool _dn_main = close < rob_main
+bool _dn_slow = close < rob_slow
+
+bool rob_up_and = (rob_show_fast ? _up_fast : true)  and (rob_show_main ? _up_main : true)  and (rob_show_slow ? _up_slow : true)
+bool rob_dn_and = (rob_show_fast ? _dn_fast : true)  and (rob_show_main ? _dn_main : true)  and (rob_show_slow ? _dn_slow : true)
+bool rob_up_any = (rob_show_fast ? _up_fast : false) or  (rob_show_main ? _up_main : false) or  (rob_show_slow ? _up_slow : false)
+bool rob_dn_any = (rob_show_fast ? _dn_fast : false) or  (rob_show_main ? _dn_main : false) or  (rob_show_slow ? _dn_slow : false)
+
+bool _up_pri_f = rob_show_fast ? _up_fast : (rob_show_main ? _up_main : _up_slow)
+bool _up_pri_m = rob_show_main ? _up_main : (rob_show_fast ? _up_fast : _up_slow)
+bool _up_pri_s = rob_show_slow ? _up_slow : (rob_show_main ? _up_main : _up_fast)
+bool _dn_pri_f = rob_show_fast ? _dn_fast : (rob_show_main ? _dn_main : _dn_slow)
+bool _dn_pri_m = rob_show_main ? _dn_main : (rob_show_fast ? _dn_fast : _dn_slow)
+bool _dn_pri_s = rob_show_slow ? _dn_slow : (rob_show_main ? _dn_main : _dn_fast)
+
+bool rob_trend_up = switch rob_align_mode
+    "AND (semua harus align)" => rob_up_and
+    "OR (salah satu cukup)"   => rob_up_any
+    "Priority FAST"            => _up_pri_f
+    "Priority MAIN"            => _up_pri_m
+    "Priority SLOW"            => _up_pri_s
+    =>                            rob_up_and
+
+bool rob_trend_dn = switch rob_align_mode
+    "AND (semua harus align)" => rob_dn_and
+    "OR (salah satu cukup)"   => rob_dn_any
+    "Priority FAST"            => _dn_pri_f
+    "Priority MAIN"            => _dn_pri_m
+    "Priority SLOW"            => _dn_pri_s
+    =>                            rob_dn_and
+
+if rob_stack_on and rob_show_fast and rob_show_main and rob_show_slow
+    bool st_bull = rob_stack_eq_ok ? (rob_fast >= rob_main and rob_main >= rob_slow) : (rob_fast > rob_main and rob_main > rob_slow)
+    bool st_bear = rob_stack_eq_ok ? (rob_fast <= rob_main and rob_main <= rob_slow) : (rob_fast < rob_main and rob_main < rob_slow)
+    rob_trend_up := rob_trend_up and st_bull
+    rob_trend_dn := rob_trend_dn and st_bear
+
+// ═══════════════════════════════════════════════════════════════════
+// MOMENTUM CANDLE
+// ═══════════════════════════════════════════════════════════════════
+float body     = math.abs(close - open)
+float full_rng = high - low
+float wick_rat = full_rng > 0 ? (full_rng - body) / full_rng : na
+
+bool is_bull_c = close > open
+bool is_bear_c = close < open
+
+// Fixed Pips
+bool fp_ok = false
+if mom_mode == "Fixed Pips"
+    float thresh = fp_min_pips * fp_pip_size
+    fp_ok := body >= thresh
+
+// Dynamic ATR
+bool atr_ok = false
+if mom_mode == "Dynamic ATR"
+    float atr_val = f_atr(atr_len, atr_smooth) * atr_mult
+    atr_ok := body >= atr_val
+
+// Smart Stats
+bool smt_ok = false
+if mom_mode == "Smart Stats"
+    float med_b    = ta.median(body, qt_look)
+    float mad_b    = f_mad(body, qt_look)
+    float thr_s    = med_b + mad_b * qt_dev
+    bool mom_pass  = body >= thr_s
+    bool wick_pass = full_rng > 0 and wick_rat <= qt_max_wick
+    smt_ok := mom_pass and wick_pass
+
+// CRT 2-Candle
+bool crt_bull  = false
+bool crt_bear  = false
+bool crt_is_t1 = false
+bool crt_is_t2 = false
+
+if mom_mode == "CRT (2-Candle)"
+    float o1 = open[1]
+    float h1 = high[1]
+    float l1 = low[1]
+    float c1 = close[1]
+    float r1 = h1 - l1
+    float b1 = math.abs(c1 - o1)
+    float r2 = high - low
+    float b2 = math.abs(close - open)
+    float b1pct = r1 > 0 ? b1 * 100.0 / r1 : 0.0
+    float b2pct = r2 > 0 ? b2 * 100.0 / r2 : 0.0
+    bool c1_bull_loc = c1 > o1
+    bool c1_bear_loc = c1 < o1
+    bool c2_bull_loc = close > open
+    bool c2_bear_loc = close < open
+    bool dir_ok = switch crt_dir
+        "Same Direction" => (c1_bull_loc and c2_bull_loc) or (c1_bear_loc and c2_bear_loc)
+        "Opposite"       => (c1_bull_loc and c2_bear_loc) or (c1_bear_loc and c2_bull_loc)
+        =>                  true
+    bool body_ratio = r1 > 0 ? b2 <= r1 * crt_c2_max_ratio : false
+    bool close_in   = crt_close_inside ? (close >= l1 and close <= h1) : true
+    bool shared = not na(h1) and b1pct >= crt_c1_body_pct and b2pct >= crt_c2_body_pct and dir_ok and body_ratio and close_in
+    bool t1 = shared and crt_t1_on and ((c1_bear_loc and low  < l1) or (c1_bull_loc and high > h1))
+    bool t2 = shared and crt_t2_on and ((c1_bear_loc and low >= l1) or (c1_bull_loc and high <= h1))
+    crt_is_t1 := t1
+    crt_is_t2 := t2
+    crt_bull := (t1 or t2) and c1_bear_loc
+    crt_bear := (t1 or t2) and c1_bull_loc
+
+// Combine
+bool mom_bull = false
+bool mom_bear = false
+if mom_mode == "CRT (2-Candle)"
+    mom_bull := crt_bull
+    mom_bear := crt_bear
+else
+    bool pass = switch mom_mode
+        "Fixed Pips"  => fp_ok
+        "Dynamic ATR" => atr_ok
+        =>               smt_ok
+    mom_bull := pass and is_bull_c
+    mom_bear := pass and is_bear_c
+
+// ═══════════════════════════════════════════════════════════════════
+// SIGNAL GENERATION
+// ═══════════════════════════════════════════════════════════════════
+bool bull_raw = mom_bull
+bool bear_raw = mom_bear
+
+if rob_dir_on
+    if not (rob_trend_up or rob_trend_dn)
+        bull_raw := false
+        bear_raw := false
+    else if rob_dir_mode == "Only One Direction"
+        if bull_raw and not rob_trend_up
+            bull_raw := false
+        if bear_raw and not rob_trend_dn
+            bear_raw := false
+    else
+        if rob_trend_up
+            bear_raw := false
+        if rob_trend_dn
+            bull_raw := false
+
+bool sig_bull = bull_raw and (side_mode == "Both" or side_mode == "Buy Only")
+bool sig_bear = bear_raw and (side_mode == "Both" or side_mode == "Sell Only")
+
+// ═══════════════════════════════════════════════════════════════════
+// SIGNAL LABELS
+// ═══════════════════════════════════════════════════════════════════
+float atr_sp = f_atr(14, "RMA") * 0.5
+
+f_sig_sz(s) =>
+    switch s
+        "Tiny"  => size.tiny
+        "Small" => size.small
+        "Large" => size.large
+        "Huge"  => size.huge
+        =>         size.normal
+
+f_draw_marker(is_bull, col, sz, crt_t1, crt_t2) =>
+    float y   = is_bull ? low - atr_sp : high + atr_sp
+    string crt_sfx = show_crt_type and mom_mode == "CRT (2-Candle)" ? (crt_t1 ? " T1" : " T2") : ""
+    if sig_marker_style == "Segitiga"
+        if is_bull
+            label.new(bar_index, y, "", style=label.style_triangleup,
+                 color=col, textcolor=sig_txt_col, size=sz)
+        else
+            label.new(bar_index, y, "", style=label.style_triangledown,
+                 color=col, textcolor=sig_txt_col, size=sz)
+    else if sig_marker_style == "Lingkaran"
+        label.new(bar_index, y, "", style=label.style_circle,
+             color=col, textcolor=sig_txt_col, size=sz)
+    else if sig_marker_style == "Diamond"
+        label.new(bar_index, y, "", style=label.style_diamond,
+             color=col, textcolor=sig_txt_col, size=sz)
+    else if sig_marker_style == "Panah"
+        if is_bull
+            label.new(bar_index, y, "", style=label.style_arrowup,
+                 color=col, textcolor=sig_txt_col, size=sz)
+        else
+            label.new(bar_index, y, "", style=label.style_arrowdown,
+                 color=col, textcolor=sig_txt_col, size=sz)
+    else
+        // Label Teks
+        string custom_txt = (is_bull ? sig_txt_bull : sig_txt_bear) + crt_sfx
+        if is_bull
+            label.new(bar_index, y, custom_txt, style=label.style_label_up,
+                 color=col, textcolor=sig_txt_col, size=sz)
+        else
+            label.new(bar_index, y, custom_txt, style=label.style_label_down,
+                 color=col, textcolor=sig_txt_col, size=sz)
+
+if barstate.isconfirmed and show_sig_lbl
+    float sz_eff = na
+    string sz_str = sig_marker_sz
+    if sig_bull
+        f_draw_marker(true,  sig_col_buy,  f_sig_sz(sz_str), crt_is_t1, crt_is_t2)
+    else if sig_bear
+        f_draw_marker(false, sig_col_sell, f_sig_sz(sz_str), crt_is_t1, crt_is_t2)
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
+var table dash = table.new(position.top_right, 2, 15,
+     bgcolor=dash_bg_col, border_width=1, frame_width=1)
+
+f_row(row, lbl, val, val_col) =>
+    table.cell(dash, 0, row, lbl, text_color=dash_lbl_col, bgcolor=na,
+         text_halign=text.align_right, text_size=f_sz(dash_txt_sz))
+    table.cell(dash, 1, row, val, text_color=val_col, bgcolor=na,
+         text_halign=text.align_left,  text_size=f_sz(dash_txt_sz))
+
+if dash_on and barstate.islast
+    table.set_position(dash, f_pos(dash_pos))
+    table.clear(dash, 0, 0, 1, 14)
+
+    // Header row
+    table.cell(dash, 0, 0, "Robust + MomCand",
+         text_color=dash_txt_col, bgcolor=dash_hdr_col,
+         text_halign=text.align_center, text_size=f_sz(dash_txt_sz))
+    table.merge_cells(dash, 0, 0, 1, 0)
+
+    f_row(1, "Mode", mom_mode, color.yellow)
+
+    string rob_dir_txt = rob_trend_up ? "BULL UP" : rob_trend_dn ? "BEAR DN" : "NEUTRAL"
+    color  rob_dir_col = rob_trend_up ? color.lime : rob_trend_dn ? color.red : color.gray
+    f_row(2, "Rob Dir", rob_dir_txt, rob_dir_col)
+
+    f_row(3, "Align", rob_align_mode, color.yellow)
+    f_row(4, "Stack", rob_stack_on ? "ON" : "OFF", rob_stack_on ? color.lime : color.gray)
+    f_row(5, "Rob Filter", rob_dir_on ? "ON" : "OFF", rob_dir_on ? color.lime : color.gray)
+
+    string htf_dir_txt = htf_cls > htf_fast ? "above FAST" : htf_cls < htf_fast ? "below FAST" : "at FAST"
+    color  htf_dir_col = htf_cls > htf_fast ? color.lime : htf_cls < htf_fast ? color.red : color.gray
+    f_row(6, "HTF " + htf_tf, htf_on ? htf_dir_txt : "OFF", htf_on ? htf_dir_col : color.gray)
+
+    string sig_txt = sig_bull ? "BULL" : sig_bear ? "BEAR" : "--"
+    color  sig_col = sig_bull ? color.lime : sig_bear ? color.red : color.gray
+    f_row(7, "Signal", sig_txt, sig_col)
+
+    f_row(8,  "Body",    str.tostring(body,     format.mintick), dash_txt_col)
+    float wick_show = na(wick_rat) ? 0.0 : wick_rat
+    f_row(9,  "Wick",    str.tostring(wick_show, "#.##"),        wick_show > 0.5 ? color.orange : dash_txt_col)
+    f_row(10, "FAST",    str.tostring(rob_fast,  format.mintick), rob_col_fast)
+    f_row(11, "MAIN",    str.tostring(rob_main,  format.mintick), rob_col_main)
+    f_row(12, "SLOW",    str.tostring(rob_slow,  format.mintick), rob_col_slow)
+    string htf_val = htf_on ? str.tostring(htf_fast, format.mintick) : "OFF"
+    f_row(13, "HTF Fast", htf_val, htf_col_fast)
+    f_row(14, "Side", side_mode, color.yellow)

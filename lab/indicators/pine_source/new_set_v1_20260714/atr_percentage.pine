@@ -1,0 +1,20 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © HeWhoMustNotBeNamed
+
+//@version=4
+study("ATR Percentage")
+useAtrAsPercent = input(true)
+ATRPeriods = input(22, step=5)
+showBollingerBands = input(true)
+BBPeriods = input(20, step=10)
+StdDev = input(2, step=0.5)
+atr = atr(ATRPeriods)
+atrPercent = (atr/close) * 100
+[middle, top, bottom] = bb(useAtrAsPercent? atrPercent:atr,BBPeriods,StdDev)
+plot(useAtrAsPercent? atrPercent:atr, title="ATR/Percent", color=color.blue, linewidth=2)
+
+BBup = plot(showBollingerBands ? top: na, title="Top", color=color.red, linewidth=1, transp=50, style=plot.style_linebr)
+BBdown = plot(showBollingerBands ? bottom: na, title="Bottom", color=color.green, linewidth=1, transp=50, style=plot.style_linebr)
+BBmid = plot(showBollingerBands ? middle: na, title="Middle", color=color.purple, linewidth=1, transp=50, style=plot.style_linebr)
+fill(BBup, BBmid, title="High Volatility Zone", color=color.red, transp=90)
+fill(BBdown, BBmid, title="Low Volatility Zone", color=color.green, transp=90)

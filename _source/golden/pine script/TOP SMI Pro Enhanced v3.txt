@@ -1,0 +1,404 @@
+//@version=6
+indicator("TOP SMI Pro Enhanced v3", "TOP SMI_Pro_v3")
+
+// ===================================================
+// SMI SETTINGS
+// ===================================================
+lenK        = input.int(5,    "SMI %K",  minval=1, group="SMI", tooltip="Periode High-Low range. 5=Default (script ini), 10=Standar umum, 14-21=Long-term. Kecil=sensitif, Besar=smooth")
+lenD        = input.int(3,    "SMI %D",  minval=1, group="SMI", tooltip="Periode smoothing SMI. 3=Responsif, 5-7=Smooth, 9+=Very smooth")
+lenE        = input.int(3,    "SMI EMA", minval=1, group="SMI", tooltip="EMA signal line. Cross SMI dgn EMA = sinyal BUY/SELL. 3=Fast, 5-9=Balanced, 13+=Slow")
+smiOB       = input.int(80,   "SMI OB",  group="SMI", tooltip="Overbought level. Default 70. Sinyal SELL di zona ini")
+smiMID      = input.int(0,    "SMI MID", group="SMI", tooltip=">MID=bullish bias, <MID=bearish bias. Trigger PA/PD")
+smiOS       = input.int(-40,  "SMI OS",  group="SMI", tooltip="Oversold level. Default -40. Sinyal BUY di zona ini")
+sMk         = input.bool(true,"Markers?",             group="SMI", tooltip="Marker saat cross level. M=Cross 0, OB/OS=Enter zone, Circle=Exit zone")
+
+// ===================================================
+// RIBBON
+// ===================================================
+showRibbon  = input.bool(true, "Show Ribbon?",  group="Ribbon", tooltip="Ribbon bertumpuk di bawah. L1=weak, L2=extreme OB/OS, L3=super extreme")
+rHeight     = input.float(25, "Box Height",     group="Ribbon", minval=1, maxval=30, step=0.5)
+rGap        = input.float(2,  "Gap",            group="Ribbon", minval=0, maxval=10, step=0.5)
+extLvl      = input.int(100,  "Extreme Level",  group="Ribbon", minval=80, maxval=120)
+rTrans      = input.int(30,   "Transparency",   group="Ribbon", minval=0, maxval=95)
+rWk         = input.color(color.orange, "Sell L1", group="Ribbon")
+rMd         = input.color(color.red,    "Sell L2", group="Ribbon")
+rSt         = input.color(#8b0000,      "Sell L3", group="Ribbon")
+bWk         = input.color(color.aqua,   "Buy L1",  group="Ribbon")
+bMd         = input.color(color.green,  "Buy L2",  group="Ribbon")
+bSt         = input.color(color.lime,   "Buy L3",  group="Ribbon")
+
+// ===================================================
+// SMI LINE COLORS
+// ===================================================
+sBull       = input.color(color.lime,   "SMI Bull", group="Colors")
+sBear       = input.color(color.red,    "SMI Bear", group="Colors")
+sEC         = input.color(color.white,  "SMI EMA",  group="Colors")
+obCol       = input.color(color.red,    "OB Line",  group="Colors")
+midCol      = input.color(color.yellow, "MID Line", group="Colors")
+osCol       = input.color(color.green,  "OS Line",  group="Colors")
+
+// ===================================================
+// HISTOGRAM COLORS
+// ===================================================
+hAU         = input.color(color.aqua,   "Hist AU", group="Hist", tooltip="Above-Up: SMI>EMA, hist naik (bull kuat)")
+hAD         = input.color(color.blue,   "Hist AD", group="Hist", tooltip="Above-Down: SMI>EMA, hist turun (bull lemah)")
+hBD         = input.color(color.red,    "Hist BD", group="Hist", tooltip="Below-Down: SMI<EMA, hist naik (bear kuat)")
+hBU         = input.color(color.maroon, "Hist BU", group="Hist", tooltip="Below-Up: SMI<EMA, hist turun (bear lemah)")
+
+// ===================================================
+// PA / PD LABELS
+// ===================================================
+showLbl     = input.bool(true, "Show PA/PD Lines?", group="Labels", tooltip="Garis vertikal saat akumulasi/distribusi terkonfirmasi. Warna & teks otomatis ikut status Dip/Ready dari Bar Color")
+akumCandles = input.int(2, "Pre-Akum Candles", minval=1, maxval=20, group="Labels", tooltip="Min candle close <MID untuk PA. 1=Scalping, 2=Default, 3-5=H4-D1")
+distCandles = input.int(2, "Pre-Dist Candles", minval=1, maxval=20, group="Labels", tooltip="Min candle close >MID untuk PD. Guidance sama dgn PA")
+lineWidth   = input.int(2, "Line Width", minval=1, maxval=3, group="Labels")
+lnPADip     = input.color(color.new(#2E7D32, 0), "PA Line - Dip Mungkin (Dash)",  group="Labels", tooltip="Garis vertikal saat PA muncul tapi histogram masih melemah. Style: dashed")
+lnPAReady   = input.color(color.new(#00E676, 0), "PA Line - Siap Balik (Solid)",  group="Labels", tooltip="Garis vertikal saat PA muncul dan histogram mulai menguat. Style: solid")
+lnPDDip     = input.color(color.new(#F9A825, 0), "PD Line - Dip Mungkin (Dash)",  group="Labels", tooltip="Garis vertikal saat PD muncul tapi histogram masih menguat. Style: dashed")
+lnPDReady   = input.color(color.new(#FF6F00, 0), "PD Line - Siap Balik (Solid)",  group="Labels", tooltip="Garis vertikal saat PD muncul dan histogram mulai melemah. Style: solid")
+
+// ===================================================
+// DIVERGENCE
+// ===================================================
+showDiv       = input.bool(true,  "Aktifkan Divergence?", group="Divergence", tooltip="Bandingkan pivot SMI vs pivot harga. Bullish = harga lower low tapi SMI higher low. Bearish = harga higher high tapi SMI lower high")
+showHiddenDiv = input.bool(false, "Aktifkan Hidden Divergence?", group="Divergence", tooltip="Sinyal continuation, bukan reversal. Off by default krn lebih sering muncul/lebih noisy")
+divLbL        = input.int(5,  "Pivot Left Bars",  minval=1, group="Divergence", tooltip="Bar ke kiri buat konfirmasi pivot. Kecil=lebih sensitif/cepat, Besar=lebih selektif")
+divLbR        = input.int(5,  "Pivot Right Bars", minval=1, group="Divergence", tooltip="Bar ke kanan buat konfirmasi pivot (otomatis nambah delay/lag). Sama prinsip dgn Pivot Left")
+divRangeMin   = input.int(5,  "Min Bar Antar Pivot",  minval=1, group="Divergence", tooltip="Jarak minimum antar 2 pivot biar dianggap valid, biar gak ke-trigger oleh noise super pendek")
+divRangeMax   = input.int(60, "Max Bar Antar Pivot",  minval=1, group="Divergence", tooltip="Jarak maksimum antar 2 pivot, biar gak banding-bandingin pivot yang udah terlalu jauh/gak relevan lagi")
+divBullCol       = input.color(color.new(#00E676, 0), "Bullish Divergence",        group="Divergence")
+divBearCol       = input.color(color.new(#FF1744, 0), "Bearish Divergence",        group="Divergence")
+divHiddenBullCol = input.color(color.new(#80CBC4, 0), "Hidden Bullish Divergence", group="Divergence")
+divHiddenBearCol = input.color(color.new(#F48FB1, 0), "Hidden Bearish Divergence", group="Divergence")
+
+// ===================================================
+// BAR COLOR SETTINGS v3 - EVENT-ONLY + MONOCHROME BACKGROUND
+// ===================================================
+showBarColor    = input.bool(true, "Color Main Bar?", group="Bar Color", tooltip="v3: hanya event penting yang dapat warna mencolok (cross, OB/OS, PA/PD+momentum, failed-mid). Sisanya jadi background abu-abu monokrom")
+bcTrans         = input.int(15, "Bar Transparency", minval=0, maxval=90, group="Bar Color", tooltip="0=Solid, 90=Transparan. Rekomen 10-20")
+
+bcCrossUp       = input.color(color.new(#00E5FF, 0),   "Cross UP   (Cyan)",        group="Bar Color", tooltip="SMI crossover EMA. Sinyal bullish terkuat.")
+bcCrossDown     = input.color(color.white,              "Cross DOWN (Putih)",       group="Bar Color", tooltip="SMI crossunder EMA. Sinyal bearish terkuat.")
+
+bcOBZone        = input.color(color.new(#FF1744, 0),   "OB Zone    (Red)",         group="Bar Color", tooltip="SMI > OB. Extreme overbought.")
+bcOSZone        = input.color(color.new(#2979FF, 0),   "OS Zone    (Blue)",        group="Bar Color", tooltip="SMI < OS. Extreme oversold.")
+
+bcPADip         = input.color(color.new(#2E7D32, 0),   "PA - Dip Mungkin (Hijau Tua)",    group="Bar Color", tooltip="PA terkonfirmasi TAPI histogram masih melemah -> momentum bearish belum habis, kemungkinan masih ada cekungan/dip sebelum reversal beneran")
+bcPAReady       = input.color(color.new(#00E676, 0),   "PA - Siap Balik (Hijau Terang)",  group="Bar Color", tooltip="PA terkonfirmasi DAN histogram mulai menguat -> momentum bearish udah mereda, reversal lebih mungkin terjadi segera")
+
+bcPDDip         = input.color(color.new(#F9A825, 0),   "PD - Dip Mungkin (Amber Tua)",    group="Bar Color", tooltip="PD terkonfirmasi TAPI histogram masih menguat -> momentum bullish belum habis, kemungkinan masih ada upside/puncak ganda sebelum reversal beneran")
+bcPDReady       = input.color(color.new(#FF6F00, 0),   "PD - Siap Balik (Oranye Terang)", group="Bar Color", tooltip="PD terkonfirmasi DAN histogram mulai melemah -> momentum bullish udah mereda, reversal turun lebih mungkin terjadi segera")
+
+bcFailMIDBuy    = input.color(color.new(#A9C8F5, 0),   "Fail MID Buy  (Biru Pastel)", group="Bar Color", tooltip="SMI cross MID atas lalu balik turun. PA batal -> sinyal jebakan/fakeout")
+bcFailMIDSell   = input.color(color.new(#DDA0DD, 0),   "Fail MID Sell (Pink Pastel)", group="Bar Color", tooltip="SMI cross MID bawah lalu balik naik. PD batal -> sinyal jebakan/fakeout")
+
+bcBgBull        = input.color(color.new(#8A8A8E, 0),   "Background Bias Atas (Abu)",         group="Bar Color", tooltip="Default state, SMI di atas MID tanpa event spesial. Abu medium biar tetap kelihatan jelas, kontras dgn event di atasnya")
+bcBgBear        = input.color(color.new(#75757A, 0),   "Background Bias Bawah (Abu Gelap)",  group="Bar Color", tooltip="Default state, SMI di bawah MID tanpa event spesial. Abu sedikit lebih gelap, tetap jelas terlihat")
+bcBgNeutral     = input.color(color.new(#606064, 0),   "Background Netral (Abu Paling Gelap)", group="Bar Color", tooltip="SMI persis di MID/OB/OS, edge case yang jarang terjadi")
+
+// ===================================================
+// DASHBOARD
+// ===================================================
+showDash    = input.bool(true, "Show Dashboard?", group="Dashboard")
+dashPos     = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right","Middle Left"], group="Dashboard")
+dashSize    = input.string("Normal", "Size", options=["Tiny","Small","Normal","Large"], group="Dashboard")
+dashBg      = input.color(color.new(#1e222d, 10), "BG Color", group="Dashboard")
+
+// ===================================================
+// SMI CALCULATION
+// ===================================================
+emaEma(s, l) => ta.ema(ta.ema(s, l), l)
+
+hh     = ta.highest(lenK)
+ll     = ta.lowest(lenK)
+rel    = close - (hh + ll) / 2
+rng    = hh - ll
+smi    = 200 * (emaEma(rel, lenD) / emaEma(rng, lenD))
+smiEma = ta.ema(smi, lenE)
+smiH   = smi - smiEma
+
+sAb    = smi >= smiEma
+sHAU   = smiH > smiH[1] and smiH  > 0
+sHAD   = smiH < smiH[1] and smiH  > 0
+sHBD   = smiH < smiH[1] and smiH <= 0
+sHBU   = smiH > smiH[1] and smiH <= 0
+
+sLC    = sAb ? sBull : sBear
+sHC    = sHAU ? hAU : sHAD ? hAD : sHBD ? hBD : sHBU ? hBU : color.gray
+
+sCr    = ta.cross(smi, smiEma)
+sCU    = ta.crossover(smi, smiEma)
+sCD    = ta.crossunder(smi, smiEma)
+
+// ===================================================
+// PA / PD COUNTER
+// ===================================================
+var int bCnt = 0
+var int aCnt = 0
+
+if smi < smiMID
+    bCnt := bCnt + 1
+    aCnt := 0
+else if smi > smiMID
+    aCnt := aCnt + 1
+    bCnt := 0
+else
+    bCnt := 0
+    aCnt := 0
+
+preAkum  = bCnt == akumCandles
+preDist  = aCnt == distCandles
+
+// ===================================================
+// PA/PD + HISTOGRAM MOMENTUM CLASSIFICATION (v3 baru)
+// ===================================================
+paMomentumRising  = smiH >= smiH[1]
+paMomentumFalling = smiH <  smiH[1]
+
+paDip   = preAkum and paMomentumFalling
+paReady = preAkum and paMomentumRising
+
+pdDip   = preDist and paMomentumRising
+pdReady = preDist and paMomentumFalling
+
+// ===================================================
+// STATE DETECTION v3 - FAILED MID HOLD (fakeout warning)
+// ===================================================
+failedMIDHoldBuy  = (smi > smiMID) and (smi[1] < smiMID) and (bCnt[1] > 0)
+failedMIDHoldSell = (smi < smiMID) and (smi[1] > smiMID) and (aCnt[1] > 0)
+
+// ===================================================
+// CROSS BAR TRACKING
+// ===================================================
+var int sLB = 0
+if sCr
+    sLB := bar_index
+sBA = bar_index - sLB
+
+// ===================================================
+// DIVERGENCE DETECTION - pivot SMI dibanding pivot harga
+// ===================================================
+plFound = not na(ta.pivotlow(smi, divLbL, divLbR))
+phFound = not na(ta.pivothigh(smi, divLbL, divLbR))
+
+var float lastPlOsc   = na
+var float lastPlPrice = na
+var int   lastPlBar   = na
+var float lastPhOsc   = na
+var float lastPhPrice = na
+var int   lastPhBar   = na
+
+if plFound
+    curPlBar   = bar_index - divLbR
+    curPlOsc   = smi[divLbR]
+    curPlPrice = low[divLbR]
+    if not na(lastPlBar)
+        barsGap = curPlBar - lastPlBar
+        if barsGap >= divRangeMin and barsGap <= divRangeMax
+            if showDiv and curPlPrice < lastPlPrice and curPlOsc > lastPlOsc
+                line.new(lastPlBar, lastPlOsc, curPlBar, curPlOsc, xloc=xloc.bar_index, color=divBullCol, width=2)
+                label.new(curPlBar, curPlOsc, text="Bull", color=color.new(color.black, 100), textcolor=divBullCol, style=label.style_label_up, size=size.small, xloc=xloc.bar_index)
+            if showHiddenDiv and curPlPrice > lastPlPrice and curPlOsc < lastPlOsc
+                line.new(lastPlBar, lastPlOsc, curPlBar, curPlOsc, xloc=xloc.bar_index, color=divHiddenBullCol, width=1, style=line.style_dashed)
+                label.new(curPlBar, curPlOsc, text="H.Bull", color=color.new(color.black, 100), textcolor=divHiddenBullCol, style=label.style_label_up, size=size.small, xloc=xloc.bar_index)
+    lastPlOsc   := curPlOsc
+    lastPlPrice := curPlPrice
+    lastPlBar   := curPlBar
+
+if phFound
+    curPhBar   = bar_index - divLbR
+    curPhOsc   = smi[divLbR]
+    curPhPrice = high[divLbR]
+    if not na(lastPhBar)
+        barsGap = curPhBar - lastPhBar
+        if barsGap >= divRangeMin and barsGap <= divRangeMax
+            if showDiv and curPhPrice > lastPhPrice and curPhOsc < lastPhOsc
+                line.new(lastPhBar, lastPhOsc, curPhBar, curPhOsc, xloc=xloc.bar_index, color=divBearCol, width=2)
+                label.new(curPhBar, curPhOsc, text="Bear", color=color.new(color.black, 100), textcolor=divBearCol, style=label.style_label_down, size=size.small, xloc=xloc.bar_index)
+            if showHiddenDiv and curPhPrice < lastPhPrice and curPhOsc > lastPhOsc
+                line.new(lastPhBar, lastPhOsc, curPhBar, curPhOsc, xloc=xloc.bar_index, color=divHiddenBearCol, width=1, style=line.style_dashed)
+                label.new(curPhBar, curPhOsc, text="H.Bear", color=color.new(color.black, 100), textcolor=divHiddenBearCol, style=label.style_label_down, size=size.small, xloc=xloc.bar_index)
+    lastPhOsc   := curPhOsc
+    lastPhPrice := curPhPrice
+    lastPhBar   := curPhBar
+
+// ===================================================
+// BAR COLOR LOGIC v3 - EVENT-ONLY CASCADE + MONOCHROME BACKGROUND
+// ===================================================
+var color barCol = na
+if not showBarColor
+    barCol := na
+else if sCU
+    barCol := color.new(bcCrossUp, bcTrans)
+else if sCD
+    barCol := color.new(bcCrossDown, bcTrans)
+else if smi > smiOB
+    barCol := color.new(bcOBZone, bcTrans)
+else if smi < smiOS
+    barCol := color.new(bcOSZone, bcTrans)
+else if paDip
+    barCol := color.new(bcPADip, bcTrans)
+else if paReady
+    barCol := color.new(bcPAReady, bcTrans)
+else if pdDip
+    barCol := color.new(bcPDDip, bcTrans)
+else if pdReady
+    barCol := color.new(bcPDReady, bcTrans)
+else if failedMIDHoldBuy
+    barCol := color.new(bcFailMIDBuy, bcTrans)
+else if failedMIDHoldSell
+    barCol := color.new(bcFailMIDSell, bcTrans)
+else if smi < smiMID
+    barCol := color.new(bcBgBear, bcTrans)
+else if smi > smiMID
+    barCol := color.new(bcBgBull, bcTrans)
+else
+    barCol := color.new(bcBgNeutral, bcTrans)
+
+barcolor(barCol, title="SMI Bar Color v3")
+
+// ===================================================
+// ZONE AND SIGNAL - single-line ternaries only
+// ===================================================
+sZone  = smi > smiOB ? "OB" : smi > smiMID ? "Upper N" : smi > 0 ? "Middle" : smi > smiOS ? "Lower N" : "OS"
+sZoneC = smi > smiOB ? color.red : smi > smiMID ? color.orange : smi > 0 ? color.yellow : smi > smiOS ? color.aqua : color.lime
+sHSt   = sHAU ? "Exp Bull" : sHAD ? "Shr Bull" : sHBD ? "Exp Bear" : sHBU ? "Shr Bear" : "Neutral"
+sHStC  = sHAU ? color.lime : sHAD ? color.orange : sHBD ? color.red : sHBU ? color.maroon : color.gray
+sSig   = smi > smiOB and not sAb ? "STR SELL" : smi < smiOS and sAb ? "STR BUY" : sAb and smi > 0 ? "BUY" : not sAb and smi < 0 ? "SELL" : "NEUTRAL"
+sSigC  = sSig == "STR BUY" ? color.lime : sSig == "BUY" ? color.green : sSig == "STR SELL" ? color.red : sSig == "SELL" ? color.maroon : color.gray
+
+sStr    = sSig == "STR BUY" or sSig == "STR SELL" ? 90 : sSig == "BUY" or sSig == "SELL" ? 70 : 30
+sStrBar = str.repeat("X", math.floor(sStr / 10)) + str.repeat("-", 10 - math.floor(sStr / 10))
+
+paProg  = bCnt > 0 and bCnt < akumCandles ? str.tostring(bCnt) + "/" + str.tostring(akumCandles) : preAkum ? "TRIGGERED" : "-"
+pdProg  = aCnt > 0 and aCnt < distCandles ? str.tostring(aCnt) + "/" + str.tostring(distCandles) : preDist ? "TRIGGERED" : "-"
+paPdTxt = paReady ? "PA - Siap Balik" : paDip ? "PA - Dip Mungkin" : pdReady ? "PD - Siap Balik" : pdDip ? "PD - Dip Mungkin" : bCnt > 0 ? "PA " + paProg : aCnt > 0 ? "PD " + pdProg : "-"
+paPdC   = paReady ? bcPAReady : paDip ? bcPADip : pdReady ? bcPDReady : pdDip ? bcPDDip : bCnt > 0 ? color.aqua : aCnt > 0 ? color.yellow : color.gray
+
+// ===================================================
+// DASHBOARD STATE TEXT - single-line ternaries
+// ===================================================
+barStateTxt = sCU ? "[X] Cross UP" : sCD ? "[X] Cross DN" : smi > smiOB ? "[!!] OB Zone" : smi < smiOS ? "[!!] OS Zone" : paDip ? "[~] PA - Dip Mungkin" : paReady ? "[OK] PA - Siap Balik" : pdDip ? "[~] PD - Dip Mungkin" : pdReady ? "[OK] PD - Siap Balik" : failedMIDHoldBuy ? "[!] Fail MID Buy" : failedMIDHoldSell ? "[!] Fail MID Sell" : smi < smiMID ? "[B] Bias Bawah" : smi > smiMID ? "[S] Bias Atas" : "[-] Netral"
+
+barStateC = sCU ? bcCrossUp : sCD ? bcCrossDown : smi > smiOB ? bcOBZone : smi < smiOS ? bcOSZone : paDip ? bcPADip : paReady ? bcPAReady : pdDip ? bcPDDip : pdReady ? bcPDReady : failedMIDHoldBuy ? bcFailMIDBuy : failedMIDHoldSell ? bcFailMIDSell : smi < smiMID ? bcBgBear : smi > smiMID ? bcBgBull : bcBgNeutral
+
+// ===================================================
+// DASHBOARD POSITION AND SIZE
+// ===================================================
+dashPosEnum = dashPos == "Top Right" ? position.top_right : dashPos == "Top Left" ? position.top_left : dashPos == "Bottom Right" ? position.bottom_right : dashPos == "Bottom Left" ? position.bottom_left : dashPos == "Middle Right" ? position.middle_right : position.middle_left
+dashSzEnum  = dashSize == "Tiny" ? size.tiny : dashSize == "Small" ? size.small : dashSize == "Large" ? size.large : size.normal
+
+// ===================================================
+// SMI LINES AND PLOTS
+// ===================================================
+hline(smiOB,  "OB",  color=obCol,  linestyle=hline.style_solid, linewidth=3)
+hline(smiMID, "MID", color=midCol, linestyle=hline.style_solid, linewidth=3)
+hline(smiOS,  "OS",  color=osCol,  linestyle=hline.style_solid, linewidth=3)
+hline(120,    "Up",  color=color.new(color.gray, 80))
+hline(-120,   "Lo",  color=color.new(color.gray, 80))
+
+plot(smi,               "SMI",      color=sLC, linewidth=3)
+plot(smiEma,            "SMI EMA",  color=sEC, linewidth=2)
+plot(smiH,              "SMI Hist", color=sHC, style=plot.style_columns, linewidth=1)
+plot(sCr ? smiEma : na, "SMI Dot",  color=sLC, style=plot.style_circles,  linewidth=5)
+
+// ===================================================
+// RIBBON STACKED
+// ===================================================
+buyL1A  = showRibbon and smi < smiMID
+buyL2A  = showRibbon and smi < smiOS
+buyL3A  = showRibbon and smi < -extLvl
+sellL1A = showRibbon and smi > smiMID
+sellL2A = showRibbon and smi > smiOB
+sellL3A = showRibbon and smi > extLvl
+
+L1A = buyL1A or sellL1A
+L2A = buyL2A or sellL2A
+L3A = buyL3A or sellL3A
+
+L1_bot = -120.0
+L1_top = L1_bot + rHeight
+L2_bot = L1_top + rGap
+L2_top = L2_bot + rHeight
+L3_bot = L2_top + rGap
+L3_top = L3_bot + rHeight
+
+L1_col = color.new(buyL3A ? bSt : buyL2A ? bMd : buyL1A ? bWk : sellL3A ? rSt : sellL2A ? rMd : sellL1A ? rWk : color.gray, rTrans)
+L2_col = color.new(buyL3A ? bSt : buyL2A ? bMd : sellL3A ? rSt : sellL2A ? rMd : color.gray, rTrans)
+L3_col = color.new(buyL3A ? bSt : sellL3A ? rSt : color.gray, rTrans)
+
+L1_tp = plot(L1A ? L1_top : na, "L1T", color=na, display=display.none)
+L1_bp = plot(L1A ? L1_bot : na, "L1B", color=na, display=display.none)
+fill(L1_tp, L1_bp, color=L1_col, title="Ribbon L1")
+
+L2_tp = plot(L2A ? L2_top : na, "L2T", color=na, display=display.none)
+L2_bp = plot(L2A ? L2_bot : na, "L2B", color=na, display=display.none)
+fill(L2_tp, L2_bp, color=L2_col, title="Ribbon L2")
+
+L3_tp = plot(L3A ? L3_top : na, "L3T", color=na, display=display.none)
+L3_bp = plot(L3A ? L3_bot : na, "L3B", color=na, display=display.none)
+fill(L3_tp, L3_bp, color=L3_col, title="Ribbon L3")
+
+// ===================================================
+// MARKERS
+// ===================================================
+cUM = ta.crossover(smi, 0)
+cDM = ta.crossunder(smi, 0)
+cUO = ta.crossover(smi, smiOB)
+cDO = ta.crossunder(smi, smiOS)
+cDB = ta.crossunder(smi, smiOB)
+cUS = ta.crossover(smi, smiOS)
+
+plotshape(sMk and cUM, title="UM", style=shape.triangleup,   location=location.bottom, color=color.green,  size=size.tiny,  text="M",  textcolor=color.white)
+plotshape(sMk and cDM, title="DM", style=shape.triangledown, location=location.bottom, color=color.red,    size=size.tiny,  text="M",  textcolor=color.white)
+plotshape(sMk and cUO, title="EO", style=shape.xcross,       location=location.bottom, color=color.red,    size=size.small, text="OB", textcolor=color.white)
+plotshape(sMk and cDO, title="ES", style=shape.xcross,       location=location.bottom, color=color.green,  size=size.small, text="OS", textcolor=color.white)
+plotshape(sMk and cDB, title="XO", style=shape.circle,       location=location.bottom, color=color.orange, size=size.tiny)
+plotshape(sMk and cUS, title="XS", style=shape.circle,       location=location.bottom, color=color.aqua,   size=size.tiny)
+
+// ===================================================
+// PA / PD VERTICAL LINES v3 - warna & teks ikut status Dip/Ready
+// ===================================================
+if showLbl and preAkum
+    paLineCol   = paReady ? lnPAReady : lnPADip
+    paLineStyle = paReady ? line.style_solid : line.style_dashed
+    paTxtCol    = paReady ? lnPAReady : lnPADip
+    paTxt       = paReady ? "PA - Siap Balik" : "PA - Dip Mungkin"
+    line.new(x1=bar_index, y1=-120, x2=bar_index, y2=120, color=paLineCol, width=lineWidth, style=paLineStyle, extend=extend.none)
+    label.new(bar_index, 118, text=paTxt, color=color.new(color.black, 100), textcolor=paTxtCol, style=label.style_label_down, size=size.small)
+
+if showLbl and preDist
+    pdLineCol   = pdReady ? lnPDReady : lnPDDip
+    pdLineStyle = pdReady ? line.style_solid : line.style_dashed
+    pdTxtCol    = pdReady ? lnPDReady : lnPDDip
+    pdTxt       = pdReady ? "PD - Siap Balik" : "PD - Dip Mungkin"
+    line.new(x1=bar_index, y1=-120, x2=bar_index, y2=120, color=pdLineCol, width=lineWidth, style=pdLineStyle, extend=extend.none)
+    label.new(bar_index, 118, text=pdTxt, color=color.new(color.black, 100), textcolor=pdTxtCol, style=label.style_label_down, size=size.small)
+
+// ===================================================
+// DASHBOARD v3 - EVENT-FOCUSED + DIP/READY AWARE
+// ===================================================
+var table dash = table.new(position=dashPosEnum, columns=2, rows=10, bgcolor=dashBg, border_width=1, border_color=color.new(color.gray, 70))
+
+if showDash and barstate.islast
+    table.clear(dash, 0, 0, 1, 9)
+    table.cell(dash, 0, 0, "SMI Pro v3",                   text_color=color.white, bgcolor=color.new(color.blue, 50), text_size=dashSzEnum)
+    table.cell(dash, 1, 0, "[" + timeframe.period + "]",   text_color=color.white, bgcolor=color.new(color.blue, 50), text_size=dashSzEnum)
+    table.cell(dash, 0, 1, "Value",                        text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 1, str.tostring(smi, "#.##"),      text_color=sLC,         text_size=dashSzEnum)
+    table.cell(dash, 0, 2, "Zone",                         text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 2, sZone,                          text_color=sZoneC,      text_size=dashSzEnum)
+    table.cell(dash, 0, 3, "vs EMA",                       text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 3, sAb ? "Bull" : "Bear",          text_color=sLC,         text_size=dashSzEnum)
+    table.cell(dash, 0, 4, "Hist",                         text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 4, sHSt,                           text_color=sHStC,       text_size=dashSzEnum)
+    table.cell(dash, 0, 5, "Cross",                        text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 5, str.tostring(sBA) + " bar",     text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 0, 6, "PA/PD",                        text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 6, paPdTxt,                        text_color=paPdC,       text_size=dashSzEnum)
+    table.cell(dash, 0, 7, "Signal",                       text_color=color.white, bgcolor=color.new(sSigC, 70), text_size=dashSzEnum)
+    table.cell(dash, 1, 7, sSig,                           text_color=sSigC,       bgcolor=color.new(sSigC, 80), text_size=dashSzEnum)
+    table.cell(dash, 0, 8, "Strength",                     text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 8, sStrBar,                        text_color=sSigC,       text_size=dashSzEnum)
+    table.cell(dash, 0, 9, "Phase",                        text_color=color.white, text_size=dashSzEnum)
+    table.cell(dash, 1, 9, barStateTxt,                    text_color=barStateC,   text_size=dashSzEnum)

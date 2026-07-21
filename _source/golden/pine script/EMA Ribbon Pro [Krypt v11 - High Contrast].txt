@@ -1,0 +1,669 @@
+//@version=6
+indicator("EMA Ribbon Pro [Krypt v11 - High Contrast]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                      MA SETTINGS                           ║
+// ╚══════════════════════════════════════════════════════════════╝
+src    = input.source(close, "Source", group="MA Settings",
+         tooltip="Sumber harga input untuk semua kalkulasi MA.\n\n• close  — Harga penutupan (DEFAULT)\n• open   — Harga pembukaan\n• high   — Harga tertinggi\n• low    — Harga terendah\n• hl2    — (high+low)/2\n• hlc3   — (high+low+close)/3\n• ohlc4  — Rata-rata 4 harga")
+
+maType = input.string("EMA", "MA Type",
+         options=["SMA","EMA","WMA","RMA","HMA","DEMA","TEMA","KAMA"],
+         group="MA Settings",
+         tooltip="Jenis MA untuk SEMUA garis ribbon:\n\n• SMA  — Simple MA. Lambat, clean, dipakai institusi untuk MA200. Cocok macro.\n• EMA  — Exponential MA. Responsif, universal, proven. Cocok semua TF. (DEFAULT)\n• WMA  — Weighted MA. Lebih cepat dari SMA, lebih lambat dari EMA. Populer komunitas Asia.\n• RMA  — Wilder MA. Sama seperti yang dipakai internal RSI & ATR. Sangat smooth.\n• HMA  — Hull MA. Cepat sekaligus halus. Ideal trend following 1H–Daily.\n• DEMA — Double EMA. Kurangi lag vs EMA biasa. Cocok swing trader.\n• TEMA — Triple EMA. Paling cepat, cocok scalping & momentum.\n• KAMA — Kaufman Adaptive. Cepat saat trending, flat saat sideways. Terbaik untuk market yang berganti karakter.")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                   SHORT RIBBON (8 MA)                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+len1 = input.int(20, "Short MA 1 (Kuning)",   minval=1, group="Short Ribbon")
+len2 = input.int(25, "Short MA 2 (Orange)",   minval=1, group="Short Ribbon")
+len3 = input.int(30, "Short MA 3 (Orange)",   minval=1, group="Short Ribbon")
+len4 = input.int(35, "Short MA 4 (Merah)",    minval=1, group="Short Ribbon")
+len5 = input.int(40, "Short MA 5 (Merah)",    minval=1, group="Short Ribbon")
+len6 = input.int(45, "Short MA 6 (Merah)",    minval=1, group="Short Ribbon")
+len7 = input.int(50, "Short MA 7 (Maroon)",   minval=1, group="Short Ribbon")
+len8 = input.int(55, "Short MA 8 (Maroon)",   minval=1, group="Short Ribbon",
+       tooltip="8 MA jangka pendek membentuk ribbon momentum.\n\n• Ribbon meregang ke atas = tren bullish kuat\n• Ribbon flat/saling silang = konsolidasi/reversal\n• Harga bounce dari ribbon saat bull = entry\n• Harga gagal tembus ribbon dari bawah = konfirmasi bearish")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                   LONG RIBBON (4 MA)                       ║
+// ╚══════════════════════════════════════════════════════════════╝
+showLongMA = input.bool(true, "Show Long Term MAs", group="Long Ribbon",
+             tooltip="Tampilkan 4 MA jangka panjang (100/200/300/365).\nMatikan di TF sangat kecil agar chart tidak terlalu ramai.")
+len9  = input.int(100, "Long MA  9  (Biru)",       minval=1, group="Long Ribbon",
+        tooltip="MA 100 — support/resistance medium-term institusional.")
+len10 = input.int(200, "Long MA 10 (Ungu)",        minval=1, group="Long Ribbon",
+        tooltip="MA 200 — 'The Golden Line'. Di atas = Bull Market makro.\n⚠️ Jangan ubah dari 200 jika pakai metode MA200 Cross.")
+len11 = input.int(300, "Long MA 11 (Biru Langit)", minval=1, group="Long Ribbon",
+        tooltip="MA 300 — level macro untuk crypto & aset volatil.")
+len12 = input.int(365, "Long MA 12 (Fuchsia)",     minval=1, group="Long Ribbon",
+        tooltip="MA 365 — 1 tahun candle di TF Daily. Anchor Ribbon Divergence.\nHarga di bawah MA365 = sinyal bearish makro serius.")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                   DEVIATION BANDS                          ║
+// ╚══════════════════════════════════════════════════════════════╝
+showDeviationBands = input.bool(false, "Show Deviation Bands", group="Bands",
+                     tooltip="Pita deviasi di sekitar setiap MA Short Ribbon.")
+mult      = input.float(1.0, "Deviation Multiplier", step=0.1, minval=0.1, group="Bands",
+            tooltip="Pengali lebar pita deviasi.\n• 0.5× = sempit\n• 1.0× = default\n• 2.0× = lebar\n\nCrypto: 1.0–1.5×  |  Forex: 0.5–0.8×")
+devPeriod = input.int(20, "Deviation Period", minval=2, group="Bands",
+            tooltip="Periode lookback deviasi.\nJuga basis normalisasi label volatilitas: lookback = devPeriod × 2.\n\n• Kecil (10–15) = reaktif\n• Besar (30–50) = smooth\nDefault: 20")
+useMAD    = input.bool(true, "Use MAD instead of Stdev", group="Bands",
+            tooltip="MAD (ON) — Approx Median Absolute Deviation via SMA. Tahan outlier/spike. Cocok crypto.\nStdev (OFF) — Standard Deviation klasik. Cocok forex & distribusi normal.\n\n⚠️ Pine v6 tidak punya rolling median built-in — MAD ini approx via SMA.")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                       ATR SL                               ║
+// ╚══════════════════════════════════════════════════════════════╝
+showATRSL = input.bool(true, "Show ATR Stop Loss Lines", group="ATR",
+            tooltip="Garis SL dinamis berbasis volatilitas.\n• Teal = Long SL (di bawah harga)\n• Merah = Short SL (di atas harga)")
+multATR   = input.float(1.5, "ATR Multiplier", step=0.1, minval=0.1, group="ATR",
+            tooltip="Pengali jarak SL dari harga (ATR 14).\n\n• Long SL  = Close − (ATR × Mult)\n• Short SL = Close + (ATR × Mult)\n\n1.0× = scalping  |  1.5× = swing (DEFAULT)  |  2.5×+ = position")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               TREND & ROBUST SETTINGS                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+trendMethod = input.string("Ribbon Divergence", "Metode Trend",
+              options=["MA200 Cross","Ribbon Divergence","Short vs Long Ribbon","Ribbon Alignment"],
+              group="Robust Settings",
+              tooltip="Metode label tren di dashboard:\n\n• MA200 Cross — Close vs MA200. Binary. Cocok Daily/4H.\n• Ribbon Divergence ★ — (MA1−MA365)/MA365×100. 7 state incl OverExt. Scalable semua TF.\n• Short vs Long Ribbon — Avg pendek vs avg panjang. Cocok Daily/4H.\n• Ribbon Alignment — 8 MA tersusun sempurna? Cocok 1H–4H.")
+
+divBullStrong  = input.float(3.0, "Strong Bull Threshold (%)", step=0.5, minval=0.1, group="Robust Settings",
+                 tooltip="Threshold % untuk 'Strong Bull ▲▲'.\n\nKalibrasi:\n• Crypto Daily: 3–8%\n• Saham: 2–4%\n• Forex: 0.3–1.5%\n• TF 1H: ~50% nilai Daily\n• Weekly+: naikkan 150–200%\nDefault: 3%")
+divBullWeak    = input.float(1.0, "Bull Threshold (%)",        step=0.5, minval=0.1, group="Robust Settings",
+                 tooltip="Threshold % untuk 'Bull ▲'.\nZona Choppy = antara ±nilai ini.\nDefault: 1%")
+divOverextMult = input.float(5.0, "Overext Multiplier (×Strong)", step=0.5, minval=1.0, group="Robust Settings",
+                 tooltip="Pengali OVEREXTENDED threshold.\nFormula: OvExt = Strong Bull × nilai ini\n\nContoh default (Strong=3%): OvExt = ±15%\nNaikkan jika aset sustain divergence tinggi lama (BTC bull run).\nDefault: 5×")
+useATRFilter   = input.bool(false, "ATR Trend Validation Filter", group="Robust Settings",
+                 tooltip="Filter: tren hanya tampil saat ATR > SMA(ATR,20).\n✅ ON untuk TF kecil (30M–4H).\n❌ OFF untuk TF besar (Weekly+).\nDefault: OFF")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                     DASHBOARD                              ║
+// ╚══════════════════════════════════════════════════════════════╝
+showDashboard = input.bool(false, "Show Dashboard", group="Dashboard",
+                tooltip="Panel ringkasan kondisi pasar real-time.\nBerisi: volatilitas, tren, ribbon strength, divergence, verdict, dan referensi SL.")
+dashPos  = input.string("Bottom Left", "Position",
+           options=["Top Left","Top Center","Top Right","Middle Left","Middle Center","Middle Right","Bottom Left","Bottom Center","Bottom Right"],
+           group="Dashboard")
+dashSize = input.string("Normal", "Text Size",
+           options=["Tiny","Small","Normal","Large","Huge"],
+           group="Dashboard")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                   HELPER FUNCTIONS                         ║
+// ╚══════════════════════════════════════════════════════════════╝
+hma(source, length) =>
+    half  = math.max(1, math.round(length / 2))
+    sqrtl = math.max(1, math.round(math.sqrt(length)))
+    ta.wma(2.0 * ta.wma(source, half) - ta.wma(source, length), sqrtl)
+
+dema(source, length) =>
+    e = ta.ema(source, length)
+    2.0 * e - ta.ema(e, length)
+
+tema(source, length) =>
+    e1 = ta.ema(source, length)
+    e2 = ta.ema(e1, length)
+    e3 = ta.ema(e2, length)
+    3.0 * e1 - 3.0 * e2 + e3
+
+// FIX: getMA tidak perlu handle KAMA — KAMA sudah di-handle via isKAMA flag
+// Switch default fallback ke EMA (sebelumnya implicit, sekarang explicit)
+getMA(source, length, type) =>
+    switch type
+        "SMA"  => ta.sma(source, length)
+        "EMA"  => ta.ema(source, length)
+        "WMA"  => ta.wma(source, length)
+        "RMA"  => ta.rma(source, length)
+        "HMA"  => hma(source, length)
+        "DEMA" => dema(source, length)
+        "TEMA" => tema(source, length)
+        =>        ta.ema(source, length)
+
+mad(source, length) =>
+    ta.sma(math.abs(source - ta.sma(source, length)), length)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     KAMA INLINE — var-in-function bug workaround           ║
+// ╚══════════════════════════════════════════════════════════════╝
+kamaCalc(source, length, prev) =>
+    fastSC    = 2.0 / 3.0
+    slowSC    = 2.0 / 31.0
+    direction = math.abs(source - source[length])
+    noise     = math.sum(math.abs(source - source[1]), length)
+    er        = noise != 0.0 ? direction / noise : 0.0
+    sc        = math.pow(er * (fastSC - slowSC) + slowSC, 2)
+    na(prev) ? source : prev + sc * (source - prev)
+
+var float kama1_v  = na
+var float kama2_v  = na
+var float kama3_v  = na
+var float kama4_v  = na
+var float kama5_v  = na
+var float kama6_v  = na
+var float kama7_v  = na
+var float kama8_v  = na
+var float kama9_v  = na
+var float kama10_v = na
+var float kama11_v = na
+var float kama12_v = na
+
+kama1_v  := kamaCalc(src, len1,  kama1_v)
+kama2_v  := kamaCalc(src, len2,  kama2_v)
+kama3_v  := kamaCalc(src, len3,  kama3_v)
+kama4_v  := kamaCalc(src, len4,  kama4_v)
+kama5_v  := kamaCalc(src, len5,  kama5_v)
+kama6_v  := kamaCalc(src, len6,  kama6_v)
+kama7_v  := kamaCalc(src, len7,  kama7_v)
+kama8_v  := kamaCalc(src, len8,  kama8_v)
+kama9_v  := kamaCalc(src, len9,  kama9_v)
+kama10_v := kamaCalc(src, len10, kama10_v)
+kama11_v := kamaCalc(src, len11, kama11_v)
+kama12_v := kamaCalc(src, len12, kama12_v)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                  MA CALCULATIONS                           ║
+// ╚══════════════════════════════════════════════════════════════╝
+isKAMA = maType == "KAMA"
+ma1  = isKAMA ? kama1_v  : getMA(src, len1,  maType)
+ma2  = isKAMA ? kama2_v  : getMA(src, len2,  maType)
+ma3  = isKAMA ? kama3_v  : getMA(src, len3,  maType)
+ma4  = isKAMA ? kama4_v  : getMA(src, len4,  maType)
+ma5  = isKAMA ? kama5_v  : getMA(src, len5,  maType)
+ma6  = isKAMA ? kama6_v  : getMA(src, len6,  maType)
+ma7  = isKAMA ? kama7_v  : getMA(src, len7,  maType)
+ma8  = isKAMA ? kama8_v  : getMA(src, len8,  maType)
+ma9  = isKAMA ? kama9_v  : getMA(src, len9,  maType)
+ma10 = isKAMA ? kama10_v : getMA(src, len10, maType)
+ma11 = isKAMA ? kama11_v : getMA(src, len11, maType)
+ma12 = isKAMA ? kama12_v : getMA(src, len12, maType)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║           DEVIATION, ATR & NORMALISASI                     ║
+// ╚══════════════════════════════════════════════════════════════╝
+rawDev   = useMAD ? mad(src, devPeriod) : ta.stdev(src, devPeriod)
+dev      = rawDev * mult
+atr      = ta.atr(14)
+slDist   = atr * multATR
+
+devPct   = close != 0.0 ? (dev / close) * 100.0 : 0.0
+atrPct   = close != 0.0 ? (atr / close) * 100.0 : 0.0
+
+// Self-calibrating: bandingkan vs rata-rata historis sendiri (devPeriod×2)
+normLen     = math.max(2, devPeriod * 2)
+devPctAvg   = ta.sma(devPct, normLen)
+atrPctAvg   = ta.sma(atrPct, normLen)
+devRatio    = devPctAvg != 0.0 ? devPct / devPctAvg : 1.0
+atrRatio    = atrPctAvg != 0.0 ? atrPct / atrPctAvg : 1.0
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║              TREND & STRENGTH CALCULATIONS                 ║
+// ╚══════════════════════════════════════════════════════════════╝
+atrSmaFilter = ta.sma(atr, 20)
+isTrending   = atr > atrSmaFilter
+
+// FIX: isDiv didefinisikan di sini — sebelumnya undefined (bug kritis)
+isDiv = trendMethod == "Ribbon Divergence"
+
+// Ribbon Divergence
+divPct        = ma12 != 0.0 ? (ma1 - ma12) / ma12 * 100.0 : 0.0
+overextThresh = divBullStrong * divOverextMult
+
+// Short vs Long avg
+avgShort = (ma1+ma2+ma3+ma4+ma5+ma6+ma7+ma8) / 8.0
+avgLong  = (ma9+ma10+ma11+ma12) / 4.0
+
+// Alignment
+isAlignedBull = ma1>ma2 and ma2>ma3 and ma3>ma4 and ma4>ma5 and ma5>ma6 and ma6>ma7 and ma7>ma8
+isAlignedBear = ma1<ma2 and ma2<ma3 and ma3<ma4 and ma4<ma5 and ma5<ma6 and ma6<ma7 and ma7<ma8
+
+// Ribbon Strength
+int strengthCount = 0
+strengthCount := (close>ma1?1:0)+(close>ma2?1:0)+(close>ma3?1:0)+(close>ma4?1:0)+
+                 (close>ma5?1:0)+(close>ma6?1:0)+(close>ma7?1:0)+(close>ma8?1:0)
+ribbonStrength = (strengthCount / 8.0) * 100.0
+
+int longStrCount = 0
+longStrCount := (close>ma9?1:0)+(close>ma10?1:0)+(close>ma11?1:0)+(close>ma12?1:0)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          VOLATILITY LABEL (self-calibrating)               ║
+// ╚══════════════════════════════════════════════════════════════╝
+getVolLabel(ratio) =>
+    string lbl = "NORMAL"
+    color  clr = color.yellow
+    if ratio < 0.7
+        lbl := "RENDAH"
+        clr := color.new(#00BFFF, 0)
+    else if ratio > 1.3
+        lbl := "TINGGI"
+        clr := color.new(#FF6600, 0)
+    [lbl, clr]
+
+[devVolLabel, devVolColor] = getVolLabel(devRatio)
+[atrVolLabel, atrVolColor] = getVolLabel(atrRatio)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               TREND LABEL RESOLVER                         ║
+// ║  No ternary tuple (CE10163 fix)                            ║
+// ╚══════════════════════════════════════════════════════════════╝
+getTrend() =>
+    string tLabel = "N/A"
+    color  tColor = color.gray
+    color  tBg    = color.new(color.gray, 85)
+
+    if useATRFilter and not isTrending
+        tLabel := "Ranging ↔"
+        tColor := color.gray
+        tBg    := color.new(color.gray, 85)
+
+    else if trendMethod == "MA200 Cross"
+        if close >= ma10
+            tLabel := "Bullish ▲"
+            tColor := color.lime
+            tBg    := color.new(#003300, 70)
+        else
+            tLabel := "Bearish ▼"
+            tColor := color.new(#FF4444, 0)
+            tBg    := color.new(#330000, 70)
+
+    else if trendMethod == "Ribbon Divergence"
+        if divPct >= overextThresh
+            tLabel := "OverExt ▲▲▲"
+            tColor := color.new(#00FFFF, 0)
+            tBg    := color.new(#003344, 70)
+        else if divPct >= divBullStrong
+            tLabel := "Strong Bull ▲▲"
+            tColor := color.new(#00FF88, 0)
+            tBg    := color.new(#003322, 70)
+        else if divPct >= divBullWeak
+            tLabel := "Bull ▲"
+            tColor := color.new(#00CC66, 0)
+            tBg    := color.new(#002211, 70)
+        else if divPct <= -overextThresh
+            tLabel := "OverExt ▼▼▼"
+            tColor := color.new(#FF00FF, 0)
+            tBg    := color.new(#330033, 70)
+        else if divPct <= -divBullStrong
+            tLabel := "Strong Bear ▼▼"
+            tColor := color.new(#FF3333, 0)
+            tBg    := color.new(#330000, 70)
+        else if divPct <= -divBullWeak
+            tLabel := "Bear ▼"
+            tColor := color.new(#FF6666, 0)
+            tBg    := color.new(#220000, 70)
+        else
+            tLabel := "Choppy ↔"
+            tColor := color.gray
+            tBg    := color.new(color.gray, 85)
+
+    else if trendMethod == "Short vs Long Ribbon"
+        if avgShort >= avgLong
+            tLabel := "Bullish ▲"
+            tColor := color.lime
+            tBg    := color.new(#003300, 70)
+        else
+            tLabel := "Bearish ▼"
+            tColor := color.new(#FF4444, 0)
+            tBg    := color.new(#330000, 70)
+
+    else if trendMethod == "Ribbon Alignment"
+        if isAlignedBull
+            tLabel := "Strong Bull ▲▲"
+            tColor := color.new(#00FF88, 0)
+            tBg    := color.new(#003322, 70)
+        else if isAlignedBear
+            tLabel := "Strong Bear ▼▼"
+            tColor := color.new(#FF3333, 0)
+            tBg    := color.new(#330000, 70)
+        else
+            tLabel := "Choppy ↔"
+            tColor := color.gray
+            tBg    := color.new(color.gray, 85)
+
+    [tLabel, tColor, tBg]
+
+[trendLabel, trendColor, trendBg] = getTrend()
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     DIVERGENCE PROXIMITY BAR (text-based progress)         ║
+// ╚══════════════════════════════════════════════════════════════╝
+divAbs      = math.abs(divPct)
+ovProximity = overextThresh > 0.0 ? math.min(divAbs / overextThresh, 1.0) : 0.0
+filledBars  = math.round(ovProximity * 8.0)
+emptyBars   = 8 - filledBars
+
+proxBar = ""
+for i = 0 to filledBars - 1
+    proxBar := proxBar + "█"
+for i = 0 to emptyBars - 1
+    proxBar := proxBar + "░"
+
+proxPct     = math.round(ovProximity * 100.0)
+proxBarFull = proxBar + "  " + str.tostring(proxPct) + "%"
+
+color proxColor = color.new(#00FF88, 0)
+if ovProximity >= 0.9
+    proxColor := color.new(#FF00FF, 0)
+else if ovProximity >= 0.7
+    proxColor := color.new(#FF3333, 0)
+else if ovProximity >= 0.5
+    proxColor := color.orange
+else if ovProximity >= 0.3
+    proxColor := color.yellow
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     SHORT STR KONTEKSTUAL                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+isBullContext = trendLabel == "Bull ▲" or trendLabel == "Strong Bull ▲▲" or
+               trendLabel == "OverExt ▲▲▲" or trendLabel == "Bullish ▲"
+isBearContext = trendLabel == "Bear ▼" or trendLabel == "Strong Bear ▼▼" or
+               trendLabel == "OverExt ▼▼▼" or trendLabel == "Bearish ▼"
+
+string shortStrCtx = ""
+color  shortStrCtxColor = color.gray
+if isBullContext
+    if ribbonStrength >= 87.5
+        shortStrCtx      := " ✔ MOMENTUM"
+        shortStrCtxColor := color.new(#00FF88, 0)
+    else if ribbonStrength >= 50.0
+        shortStrCtx      := " ↑ PULLBACK?"
+        shortStrCtxColor := color.yellow
+    else
+        shortStrCtx      := " ⚠ LEMAH"
+        shortStrCtxColor := color.orange
+else if isBearContext
+    if ribbonStrength >= 75.0
+        shortStrCtx      := " ⚠ RETEST!"
+        shortStrCtxColor := color.new(#FF6600, 0)
+    else if ribbonStrength >= 50.0
+        shortStrCtx      := " ⚠ BOUNCE?"
+        shortStrCtxColor := color.new(#FF8800, 0)
+    else
+        shortStrCtx      := " ✔ KONFIRM"
+        shortStrCtxColor := color.new(#FF3333, 0)
+else
+    shortStrCtx      := " ↔ SIDEWAYS"
+    shortStrCtxColor := color.gray
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     LONG STR KONTEKSTUAL                                   ║
+// ╚══════════════════════════════════════════════════════════════╝
+string longStrCtxLabel = ""
+if longStrCount == 4
+    longStrCtxLabel := " MACRO BULL"
+else if longStrCount == 3
+    longStrCtxLabel := " ABOVE 3/4"
+else if longStrCount == 2
+    longStrCtxLabel := " MIXED"
+else if longStrCount == 1
+    longStrCtxLabel := " NEARLY BEAR"
+else
+    longStrCtxLabel := " MACRO BEAR"
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     SUMMARY VERDICT                                        ║
+// ╚══════════════════════════════════════════════════════════════╝
+getVerdict() =>
+    string vLabel = "WAIT ⏸"
+    color  vColor = color.gray
+    color  vBg    = color.new(color.gray, 80)
+
+    if trendLabel == "OverExt ▲▲▲"
+        vLabel := "⚠ PARABOLIC — TRAIL SL"
+        vColor := color.new(#00FFFF, 0)
+        vBg    := color.new(#003344, 60)
+    else if trendLabel == "OverExt ▼▼▼"
+        vLabel := "⚠ CAPITULATE — WAIT"
+        vColor := color.new(#FF00FF, 0)
+        vBg    := color.new(#330033, 60)
+    else if trendLabel == "Strong Bull ▲▲" or trendLabel == "Bull ▲" or trendLabel == "Bullish ▲"
+        if strengthCount >= 6 and longStrCount >= 3
+            vLabel := "✔ STRONG BUY"
+            vColor := color.new(#00FF88, 0)
+            vBg    := color.new(#003322, 60)
+        else if strengthCount >= 6 and longStrCount < 3
+            vLabel := "◑ HOLD — MACRO LEMAH"
+            vColor := color.yellow
+            vBg    := color.new(#333300, 60)
+        else
+            vLabel := "↓ BUY DIP — TUNGGU"
+            vColor := color.new(#00CC66, 0)
+            vBg    := color.new(#002211, 60)
+    else if trendLabel == "Strong Bear ▼▼" or trendLabel == "Bear ▼" or trendLabel == "Bearish ▼"
+        if ribbonStrength >= 75.0
+            vLabel := "⚠ AVOID — RETEST"
+            vColor := color.new(#FF8800, 0)
+            vBg    := color.new(#331100, 60)
+        else
+            vLabel := "✖ SELL / SHORT"
+            vColor := color.new(#FF3333, 0)
+            vBg    := color.new(#330000, 60)
+    else if trendLabel == "Choppy ↔" or trendLabel == "Ranging ↔"
+        vLabel := "⏸ WAIT — NO TRADE"
+        vColor := color.gray
+        vBg    := color.new(color.gray, 80)
+
+    [vLabel, vColor, vBg]
+
+[verdictLabel, verdictColor, verdictBg] = getVerdict()
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║     DIV% DISPLAY: nilai + rasio vs threshold               ║
+// ╚══════════════════════════════════════════════════════════════╝
+divRatioVsStrong  = divBullStrong != 0.0 ? math.abs(divPct) / divBullStrong : 0.0
+divDisplayStr     = str.tostring(divPct, "#.##") + "%  (" + str.tostring(divRatioVsStrong, "#.#") + "×S)"
+
+color divDisplayCol = divPct >= 0.0 ? color.new(#00FF88, 0) : color.new(#FF3333, 0)
+if math.abs(divPct) >= overextThresh
+    divDisplayCol := color.new(#FF00FF, 0)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               PLOT SHORT RIBBON                            ║
+// ╚══════════════════════════════════════════════════════════════╝
+plot(ma1, color=color.yellow,  linewidth=2, title="MA 1 (20)")
+plot(ma2, color=color.orange,  linewidth=2, title="MA 2 (25)")
+plot(ma3, color=color.orange,  linewidth=2, title="MA 3 (30)")
+plot(ma4, color=color.red,     linewidth=2, title="MA 4 (35)")
+plot(ma5, color=color.red,     linewidth=2, title="MA 5 (40)")
+plot(ma6, color=color.red,     linewidth=2, title="MA 6 (45)")
+plot(ma7, color=color.maroon,  linewidth=2, title="MA 7 (50)")
+plot(ma8, color=color.maroon,  linewidth=2, title="MA 8 (55)")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               PLOT LONG RIBBON                             ║
+// ╚══════════════════════════════════════════════════════════════╝
+plot(showLongMA ? ma9  : na, color=color.blue,             linewidth=3, title="MA  9 (100)")
+plot(showLongMA ? ma10 : na, color=color.purple,           linewidth=3, title="MA 10 (200)")
+plot(showLongMA ? ma11 : na, color=color.new(#00BFFF, 0),  linewidth=3, title="MA 11 (300)")
+plot(showLongMA ? ma12 : na, color=color.fuchsia,          linewidth=3, title="MA 12 (365)")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               DEVIATION BANDS                              ║
+// ╚══════════════════════════════════════════════════════════════╝
+u1 = showDeviationBands ? ma1 + dev : na
+u2 = showDeviationBands ? ma2 + dev : na
+u3 = showDeviationBands ? ma3 + dev : na
+u4 = showDeviationBands ? ma4 + dev : na
+u5 = showDeviationBands ? ma5 + dev : na
+u6 = showDeviationBands ? ma6 + dev : na
+u7 = showDeviationBands ? ma7 + dev : na
+u8 = showDeviationBands ? ma8 + dev : na
+l1 = showDeviationBands ? ma1 - dev : na
+l2 = showDeviationBands ? ma2 - dev : na
+l3 = showDeviationBands ? ma3 - dev : na
+l4 = showDeviationBands ? ma4 - dev : na
+l5 = showDeviationBands ? ma5 - dev : na
+l6 = showDeviationBands ? ma6 - dev : na
+l7 = showDeviationBands ? ma7 - dev : na
+l8 = showDeviationBands ? ma8 - dev : na
+
+plot(u1, color=color.new(#FF3333, 45), linewidth=1, title="Upper Band 1")
+plot(u2, color=color.new(#FF5500, 40), linewidth=1, title="Upper Band 2")
+plot(u3, color=color.new(#FF8800, 35), linewidth=1, title="Upper Band 3")
+plot(u4, color=color.new(#FFBB00, 35), linewidth=1, title="Upper Band 4")
+plot(u5, color=color.new(#FFDD00, 40), linewidth=1, title="Upper Band 5")
+plot(u6, color=color.new(#FFEE33, 45), linewidth=1, title="Upper Band 6")
+plot(u7, color=color.new(#FFFF66, 50), linewidth=1, title="Upper Band 7")
+plot(u8, color=color.new(#FFCC00, 55), linewidth=1, title="Upper Band 8")
+plot(l1, color=color.new(#00FF88, 45), linewidth=1, title="Lower Band 1")
+plot(l2, color=color.new(#00FFAA, 40), linewidth=1, title="Lower Band 2")
+plot(l3, color=color.new(#00FFCC, 35), linewidth=1, title="Lower Band 3")
+plot(l4, color=color.new(#00FFFF, 35), linewidth=1, title="Lower Band 4")
+plot(l5, color=color.new(#33FFDD, 40), linewidth=1, title="Lower Band 5")
+plot(l6, color=color.new(#66FFCC, 45), linewidth=1, title="Lower Band 6")
+plot(l7, color=color.new(#88FFBB, 50), linewidth=1, title="Lower Band 7")
+plot(l8, color=color.new(#00CC99, 55), linewidth=1, title="Lower Band 8")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               ATR STOP LOSS                                ║
+// ╚══════════════════════════════════════════════════════════════╝
+plot(showATRSL ? close - slDist : na, color=color.new(color.teal, 0), linewidth=2, title="Long SL (ATR)")
+plot(showATRSL ? close + slDist : na, color=color.new(color.red,  0), linewidth=2, title="Short SL (ATR)")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               DASHBOARD HELPERS                            ║
+// ╚══════════════════════════════════════════════════════════════╝
+dashPosition() =>
+    switch dashPos
+        "Top Left"      => position.top_left
+        "Top Center"    => position.top_center
+        "Top Right"     => position.top_right
+        "Middle Left"   => position.middle_left
+        "Middle Center" => position.middle_center
+        "Middle Right"  => position.middle_right
+        "Bottom Left"   => position.bottom_left
+        "Bottom Center" => position.bottom_center
+        "Bottom Right"  => position.bottom_right
+        =>                 position.top_left
+
+dashTextSize() =>
+    switch dashSize
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        =>          size.small
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║               DASHBOARD RENDER — 11 BARIS                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+color strengthColor = color.gray
+if ribbonStrength >= 87.5
+    strengthColor := color.new(#00FF88, 0)
+else if ribbonStrength >= 62.5
+    strengthColor := color.new(#66FF66, 0)
+else if ribbonStrength >= 37.5
+    strengthColor := color.yellow
+else if ribbonStrength >= 12.5
+    strengthColor := color.orange
+else
+    strengthColor := color.new(#FF3333, 0)
+
+color longStrColor = color.gray
+if longStrCount == 4
+    longStrColor := color.new(#00FF88, 0)
+else if longStrCount == 3
+    longStrColor := color.new(#66FF66, 0)
+else if longStrCount == 2
+    longStrColor := color.yellow
+else if longStrCount == 1
+    longStrColor := color.orange
+else
+    longStrColor := color.new(#FF3333, 0)
+
+longSLval  = close - slDist
+shortSLval = close + slDist
+
+var table dash = table.new(position.top_left, 2, 11,
+     bgcolor=color.new(color.black, 70),
+     border_width=1, border_color=color.new(color.gray, 60))
+
+if barstate.islast and showDashboard
+    tsz = dashTextSize()
+    table.set_position(dash, dashPosition())
+
+    // ── Row 0: Header ──────────────────────────────────────────────
+    table.cell(dash, 0, 0, "Krypt v11",
+               text_color=color.white, text_size=tsz,
+               bgcolor=color.new(#1a237e, 50), text_halign=text.align_center)
+    table.cell(dash, 1, 0, "MA: " + maType + "  |  " + (useMAD ? "MAD" : "σ"),
+               text_color=color.yellow, text_size=tsz,
+               bgcolor=color.new(#1a237e, 50), text_halign=text.align_center)
+
+    // ── Row 1: Deviation ───────────────────────────────────────────
+    table.cell(dash, 0, 1, "Dev %",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 1,
+               str.tostring(devPct, "#.##") + "%  [" + devVolLabel + "]",
+               text_color=devVolColor, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 2: ATR ─────────────────────────────────────────────────
+    table.cell(dash, 0, 2, "ATR %",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 2,
+               str.tostring(atrPct, "#.##") + "%  [" + atrVolLabel + "]",
+               text_color=atrVolColor, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 3: Trend ───────────────────────────────────────────────
+    table.cell(dash, 0, 3, "Trend",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 3, trendLabel,
+               text_color=trendColor, text_size=tsz, bgcolor=trendBg)
+
+    // ── Row 4: Div% — FIX: isDiv sekarang sudah terdefinisi ───────
+    table.cell(dash, 0, 4, "Div %",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 4, isDiv ? divDisplayStr : "n/a (bukan Div mode)",
+               text_color=divDisplayCol, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 5: Proximity bar OvExt ────────────────────────────────
+    table.cell(dash, 0, 5, "→ OvExt",
+               text_color=color.gray, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 5, proxBarFull,
+               text_color=proxColor, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 6: Short Ribbon Strength ──────────────────────────────
+    table.cell(dash, 0, 6, "Short Str",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 6,
+               str.tostring(ribbonStrength, "#") + "% (" + str.tostring(strengthCount) + "/8)" + shortStrCtx,
+               text_color=shortStrCtxColor, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 7: Long Ribbon Strength ────────────────────────────────
+    table.cell(dash, 0, 7, "Long Str",
+               text_color=color.white, text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 7,
+               str.tostring(math.round((longStrCount / 4.0) * 100.0)) + "% (" + str.tostring(longStrCount) + "/4)" + longStrCtxLabel,
+               text_color=longStrColor, text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 8: VERDICT ────────────────────────────────────────────
+    table.cell(dash, 0, 8, "VERDICT",
+               text_color=color.white, text_size=tsz,
+               bgcolor=color.new(#1a237e, 70), text_halign=text.align_center)
+    table.cell(dash, 1, 8, verdictLabel,
+               text_color=verdictColor, text_size=tsz, bgcolor=verdictBg)
+
+    // ── Row 9: ATR Long SL ────────────────────────────────────────
+    table.cell(dash, 0, 9, "Long SL",
+               text_color=color.new(color.teal, 0), text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 9, str.tostring(longSLval, "#.##"),
+               text_color=color.new(color.teal, 0), text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+    // ── Row 10: ATR Short SL ──────────────────────────────────────
+    table.cell(dash, 0, 10, "Short SL",
+               text_color=color.new(#FF4444, 0), text_size=tsz, bgcolor=color.new(color.navy, 80))
+    table.cell(dash, 1, 10, str.tostring(shortSLval, "#.##"),
+               text_color=color.new(#FF4444, 0), text_size=tsz, bgcolor=color.new(color.navy, 80))
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                      ALERTS                                ║
+// ╚══════════════════════════════════════════════════════════════╝
+alertcondition(ta.crossover(close,  ma1 + dev),  title="Break Upper Band 1",   message="[Krypt v11] Price crossed ABOVE Upper Deviation Band 1")
+alertcondition(ta.crossunder(close, ma1 - dev),  title="Break Lower Band 1",   message="[Krypt v11] Price crossed BELOW Lower Deviation Band 1")
+alertcondition(ta.crossover(close,  ma10),        title="Cross Above MA200",    message="[Krypt v11] Price crossed ABOVE MA 200 — Bullish Signal")
+alertcondition(ta.crossunder(close, ma10),        title="Cross Below MA200",    message="[Krypt v11] Price crossed BELOW MA 200 — Bearish Signal")
+alertcondition(isAlignedBull and not isAlignedBull[1], title="Ribbon Aligned Bull", message="[Krypt v11] Short Ribbon fully aligned BULLISH")
+alertcondition(isAlignedBear and not isAlignedBear[1], title="Ribbon Aligned Bear", message="[Krypt v11] Short Ribbon fully aligned BEARISH")
+alertcondition(divPct >=  overextThresh and divPct[1] <  overextThresh, title="Div% Enter Overext BULL", message="[Krypt v11] Divergence % entered OVEREXTENDED BULL zone")
+alertcondition(divPct <= -overextThresh and divPct[1] > -overextThresh, title="Div% Enter Overext BEAR", message="[Krypt v11] Divergence % entered OVEREXTENDED BEAR zone")
