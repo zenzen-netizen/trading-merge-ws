@@ -97,7 +97,7 @@ def detect_signals_v3(df, high, low, close, st_trend, E, ev_by_bar):
             if fmb_b is not None and pd_b is None and PD[i] and i >= fmb_b: pd_b = i
             if fmb_b is not None and pd_b is not None and XDN[i] and i >= pd_b:
                 if st_trend[i] == -1:
-                    import atr_percentage as atrp
+                    from indicators.legacy import atr_percentage as atrp
                     entry_val = float(close[i])
                     apct_current = atrp.atr_percentage(df.iloc[:i+1], ATR_PCT_CFG)["atr_pct"]
 

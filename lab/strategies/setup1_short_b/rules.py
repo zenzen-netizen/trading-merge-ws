@@ -84,7 +84,7 @@ def _detect_free_fire(df, high, low, close, st_trend, E, ev_by_bar):
             if st_trend[i] == -1:
                 import config as cfg
                 from indicators.python.setup1_trigger import ATR_PCT_CFG
-                from indicators.python import atr_percentage as atrp
+                from indicators.legacy import atr_percentage as atrp
 
                 entry_val = float(close[i])
                 apct_current = atrp.atr_percentage(df.iloc[:i+1], ATR_PCT_CFG)["atr_pct"]
@@ -158,7 +158,7 @@ def _get_atr_pct(df: pd.DataFrame, i: int, cfg) -> float:
     sub = df.iloc[:i+1]
     if len(sub) < 2: return 1.0
     try:
-        from indicators.python.atr_percentage import atr_percentage
+        from indicators.legacy.atr_percentage import atr_percentage
         result = atr_percentage(sub, ATR_PCT_CFG)
         vals = result["atr_pct"]
         return float(vals.iloc[-1]) if len(vals) > 0 else 1.0
