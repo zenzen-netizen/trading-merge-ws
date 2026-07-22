@@ -1,6 +1,6 @@
 import sys, time, requests, pandas as pd, numpy as np
-sys.path.insert(0,"/home/ubuntu/trading-research")
-sys.path.insert(0,"/home/ubuntu/trading-research/fetchers")
+sys.path.insert(0,"/home/ubuntu/trading-merge-ws")
+sys.path.insert(0,"/home/ubuntu/trading-merge-ws/lab/data")
 import csv
 
 TF=sys.argv[1]; JOURNAL=sys.argv[2]
